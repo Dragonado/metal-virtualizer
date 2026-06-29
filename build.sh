@@ -22,7 +22,7 @@ OPT="${OPT:--O0}"                            # -O0 for lldb stepping; -O2 for ti
 WARNINGS=(-Wall -Wextra -Wpedantic -Wshadow)
 [[ "${WERROR:-0}" == "1" ]] && WARNINGS+=(-Werror)
 
-FRAMEWORKS=(-framework Metal -framework Foundation -framework QuartzCore)
+FRAMEWORKS=(-framework Metal -framework Foundation)  # QuartzCore not needed for headless compute
 
 # --- preflight ------------------------------------------------------------
 if [[ ! -f "$METAL_CPP_DIR/Metal/Metal.hpp" ]]; then

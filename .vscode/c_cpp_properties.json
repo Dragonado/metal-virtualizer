@@ -1,0 +1,16 @@
+{
+  "configurations": [
+    {
+      "name": "Mac",
+      "compilerPath": "/usr/bin/clang++",
+      "compilerArgs": ["-isystem", "${workspaceFolder}/metal-cpp"],
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${workspaceFolder}/metal-cpp"
+      ],
+      "cppStandard": "c++17",
+      "intelliSenseMode": "macos-clang-arm64"
+    }
+  ],
+  "version": 4
+}
