@@ -5,6 +5,8 @@
     "editor.tabSize": 4,
     "editor.insertSpaces": true
   },
+  "editor.inlineSuggest.enabled": false,
+  "workbench.editor.enablePreviewFromCodeNavigation": false,
   "C_Cpp.clang_format_style": "file",
   "files.readonlyInclude": {
     "metal-cpp/**": true
