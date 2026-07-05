@@ -1,0 +1,5 @@
+# clangd config. Bazel's compile_commands.json lists the compiler as
+# cc_wrapper.sh, which clangd cannot introspect for built-in system headers.
+# Override it with the real driver so <vector>, <cstdio>, etc. resolve.
+CompileFlags:
+  Compiler: /usr/bin/clang++

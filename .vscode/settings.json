@@ -8,8 +8,20 @@
   "editor.inlineSuggest.enabled": false,
   "workbench.editor.enablePreviewFromCodeNavigation": false,
   "C_Cpp.clang_format_style": "file",
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}",
+    "--background-index",
+    "--header-insertion=never"
+  ],
   "files.readonlyInclude": {
     "third_party/metal-cpp/**": true
+  },
+  "bazel.buildifierExecutable": "/opt/homebrew/bin/buildifier",
+  "bazel.buildifierFixOnFormat": true,
+  "[starlark]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "BazelBuild.vscode-bazel"
   },
   "files.exclude": {
     "bazel-*": true,
