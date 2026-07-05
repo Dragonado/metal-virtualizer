@@ -2,6 +2,7 @@
   "configurations": [
     {
       "name": "Mac",
+      "compileCommands": "${workspaceFolder}/compile_commands.json",
       "compilerPath": "/usr/bin/clang++",
       "compilerArgs": ["-isystem", "${workspaceFolder}/metal-cpp"],
       "includePath": [

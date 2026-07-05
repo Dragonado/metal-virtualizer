@@ -1,0 +1,31 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+# Both binaries link the generated gRPC library (which carries the messages via
+# its deps) and the grpc++ runtime. In the .cpp files, include:
+#   #include "proto/tnrc.pb.h"        // tnrc::HelloRequest / tnrc::HelloResponse
+#   #include "proto/tnrc.grpc.pb.h"   // tnrc::TnrcService::Service / ::Stub
+#   #include <grpcpp/grpcpp.h>        // grpc::ServerBuilder, grpc::CreateChannel
+
+cc_binary(
+    name = "server",
+    srcs = ["server.cpp"],
+    deps = [
+        "//proto:tnrc_cc_grpc",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/flags:parse",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings:str_format",
+        "@grpc//:grpc++",
+    ],
+)
+
+cc_binary(
+    name = "client",
+    srcs = ["client.cpp"],
+    deps = [
+        "//proto:tnrc_cc_grpc",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/flags:parse",
+        "@grpc//:grpc++",
+    ],
+)

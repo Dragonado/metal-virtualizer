@@ -1,0 +1,28 @@
+load("@grpc//bazel:cc_grpc_library.bzl", "cc_grpc_library")
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# 1. The schema. Import path is "proto/tnrc.proto" (relative to workspace root),
+#    so the generated headers are "proto/tnrc.pb.h" / "proto/tnrc.grpc.pb.h".
+proto_library(
+    name = "tnrc_proto",
+    srcs = ["tnrc.proto"],
+)
+
+# 2. The message classes (HelloRequest, HelloResponse) + their serialization.
+cc_proto_library(
+    name = "tnrc_cc_proto",
+    deps = [":tnrc_proto"],
+)
+
+# 3. The service glue: TnrcService::Service (server base) + TnrcService::Stub
+#    (client). grpc_only = True means "generate only the service code and reuse
+#    the messages from deps", so messages are not generated twice.
+cc_grpc_library(
+    name = "tnrc_cc_grpc",
+    srcs = [":tnrc_proto"],
+    grpc_only = True,
+    deps = [":tnrc_cc_proto"],
+)

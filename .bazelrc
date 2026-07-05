@@ -1,0 +1,24 @@
+# gRPC 1.81.1 predates Bazel 9's removal of native cc_* rules and calls
+# native.cc_library in its own build files. Re-enable autoloading of those
+# removed rules so gRPC's internal BUILD files still work under Bazel 9.
+common --incompatible_autoload_externally=+cc_library,+cc_binary,+cc_test,+cc_import,+cc_shared_library,+proto_library,+cc_proto_library,+py_binary,+py_library,+py_test
+
+# abseil (pulled in by gRPC) uses aligned new/delete, which the compiler only
+# enables when the macOS deployment target is >= 10.13. Bazel's default is
+# lower, so pin a modern minimum for both the target build and the host/exec
+# build (protoc and other host tools also link abseil).
+common --macos_minimum_os=13.0
+common --host_macos_minimum_os=13.0
+
+# gRPC's xDS code is not layering-clean, and Bazel's layering_check (Clang
+# modules enforcing include-from-direct-deps) is on by default in this
+# toolchain. gRPC 1.81.x targets the Bazel 7/8 LTS line, so disable the check.
+common --features=-layering_check
+
+# The toolchain's parse_headers feature emits standalone header-syntax-check
+# actions (-xc++-header ... foo.h.processed). Hedron's extractor asserts on
+# those because they contain no .cc source. Disable it (optional validation).
+# Must disable in BOTH the target config and the host/exec config (protoc etc.).
+common --features=-parse_headers
+common --host_features=-parse_headers
+common --host_features=-layering_check

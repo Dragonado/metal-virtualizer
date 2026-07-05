@@ -1,0 +1,30 @@
+module(
+    name = "tnrc",
+    version = "0.0.1",
+)
+
+# C++ rules (native cc_* were removed in Bazel 9, so they load from here).
+bazel_dep(name = "rules_cc", version = "0.2.17")
+
+# protobuf provides proto_library + cc_proto_library (Starlark) and libprotobuf.
+bazel_dep(name = "protobuf", version = "35.1")
+
+# abseil is pulled transitively by gRPC, but server.cpp/client.cpp include
+# absl/flags, absl/log, absl/strings directly, so declare it as a direct dep to
+# reference its targets. Version matches what the graph already resolves.
+bazel_dep(name = "abseil-cpp", version = "20250814.1")
+
+# grpc provides cc_grpc_library and the grpc++ runtime. It transitively pulls
+# apple_support; we deliberately do NOT register its toolchain, so the default
+# CLT-based cc toolchain is used (verified working on this machine).
+bazel_dep(name = "grpc", version = "1.81.1")
+
+# Dev-only: generates compile_commands.json so the editor (cpptools/clangd) sees
+# the same include paths Bazel uses, including generated + external headers.
+# Not on BCR, so pin a commit via git_override.
+bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
+git_override(
+    module_name = "hedron_compile_commands",
+    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
+    commit = "abb61a688167623088f8768cc9264798df6a9d10",
+)
