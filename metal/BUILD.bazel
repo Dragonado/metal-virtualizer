@@ -1,0 +1,12 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+# Local vector-add sample: dispatches on the real GPU, no networking involved.
+# add.metal is compiled at runtime via newLibrary(source), so it ships as a
+# plain data file, not a build step. Under `bazel run` the cwd is the runfiles
+# root, so main.cpp loads it as "metal/add.metal".
+cc_binary(
+    name = "adder",
+    srcs = ["main.cpp"],
+    data = ["add.metal"],
+    deps = ["//third_party/metal-cpp"],
+)

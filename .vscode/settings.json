@@ -9,6 +9,12 @@
   "workbench.editor.enablePreviewFromCodeNavigation": false,
   "C_Cpp.clang_format_style": "file",
   "files.readonlyInclude": {
-    "metal-cpp/**": true
+    "third_party/metal-cpp/**": true
+  },
+  "files.exclude": {
+    "bazel-*": true,
+    "external": true,
+    "compile_commands.json": true,
+    ".cache": true
   }
 }

@@ -70,3 +70,8 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# Bazel output symlinks (bazel-bin, bazel-out, ...) and the convenience
+# symlink into external deps for editor navigation.
+/bazel-*
+/external

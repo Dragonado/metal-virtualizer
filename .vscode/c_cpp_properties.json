@@ -4,10 +4,10 @@
       "name": "Mac",
       "compileCommands": "${workspaceFolder}/compile_commands.json",
       "compilerPath": "/usr/bin/clang++",
-      "compilerArgs": ["-isystem", "${workspaceFolder}/metal-cpp"],
+      "compilerArgs": ["-isystem", "${workspaceFolder}/third_party/metal-cpp"],
       "includePath": [
         "${workspaceFolder}/**",
-        "${workspaceFolder}/metal-cpp"
+        "${workspaceFolder}/third_party/metal-cpp"
       ],
       "cppStandard": "c++17",
       "intelliSenseMode": "macos-clang-arm64"

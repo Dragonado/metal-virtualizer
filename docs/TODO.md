@@ -12,7 +12,7 @@ Legend: (create) object seam, (cmd) command seam, (coh) coherence seam,
 The current `build.sh` is one `clang++` call. It will not survive gRPC and
 protobuf codegen. Stand up the plumbing before any Metal crosses the wire.
 
-- [ ] Move to a real build system (CMake) that runs protobuf/gRPC codegen
+- [x] Move to a real build system (went with Bazel, not CMake) that runs protobuf/gRPC codegen; everything including the metal sample builds via `bazel build //...`
 - [ ] Define the `.proto` service skeleton with one hello RPC
 - [ ] Trivial client <-> server RPC round-trips, no Metal involved
 - [ ] Decide the process model (client process <-> local daemon over gRPC loopback for MVP)

@@ -1,0 +1,19 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# Vendored Apple metal-cpp headers (header-only C++ wrappers over Metal's ObjC
+# API). `includes` exports this directory as -isystem, so consumers write
+# #include "Metal/Metal.hpp" and metal-cpp's own header warnings stay quiet.
+# The frameworks are linkopts here so every consumer links them transitively.
+cc_library(
+    name = "metal-cpp",
+    hdrs = glob(["**/*.hpp"]),
+    includes = ["."],
+    linkopts = [
+        "-framework",
+        "Metal",
+        "-framework",
+        "Foundation",
+    ],
+)

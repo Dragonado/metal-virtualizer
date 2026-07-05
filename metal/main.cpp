@@ -23,8 +23,17 @@ class Adder {
 
         NS::Error *err;
 
-        // Metal code is added at run time.
-        std::ifstream f("add.metal");
+        // Metal code is added at run time. Under `bazel run` the cwd is the
+        // runfiles root, so the shader sits at metal/add.metal; fall back to
+        // the bare name when running from inside metal/ directly.
+        std::ifstream f("metal/add.metal");
+        if (!f.is_open()) {
+            f.open("add.metal");
+        }
+        if (!f.is_open()) {
+            std::cerr << "ERROR: cannot find add.metal" << '\n';
+            exit(1);
+        }
         std::string src((std::istreambuf_iterator<char>(f)), {});
         MTL::Library *library = device_->newLibrary(
             NS::String::string(src.c_str(), NS::UTF8StringEncoding), nullptr, &err);
