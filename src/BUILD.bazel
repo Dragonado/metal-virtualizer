@@ -11,6 +11,7 @@ cc_binary(
     srcs = ["server.cpp"],
     deps = [
         "//proto:tnrc_cc_grpc",
+        "//third_party/metal-cpp",
         "@abseil-cpp//absl/flags:flag",
         "@abseil-cpp//absl/flags:parse",
         "@abseil-cpp//absl/log:initialize",

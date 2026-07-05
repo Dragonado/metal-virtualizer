@@ -3,3 +3,11 @@
 # Override it with the real driver so <vector>, <cstdio>, etc. resolve.
 CompileFlags:
   Compiler: /usr/bin/clang++
+
+# metal-cpp (Metal.hpp, Foundation.hpp) and the gRPC/abseil trees are umbrella /
+# transitive-header libraries. clangd's Include Cleaner misreads that pattern and
+# flags umbrella headers as "unused" or demands the sub-headers directly. Turn
+# both off so it stops fighting the intended include style.
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
