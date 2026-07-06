@@ -197,3 +197,32 @@ reason why." That framing is more rigorous and it foregrounds the actual insight
 transparency) that is a distraction from the real thesis (multiplexing one GPU
 across tenants to raise utilization). Just do not let the write-up quietly claim
 the axis I gave up.
+
+## linker error
+
+A header file never creates a object file. So we need to create a separate shim binary (not just a header).
+
+```c++
+// --- INVISIBLE STEP 1: Compiler processes metal_shim.h first ---
+#include <Metal/Metal.hpp> // 1. Compiler reads Metal.hpp. NO PASSWORD YET. 
+                           // It generates blueprints and marks Metal.hpp as "already read".
+#define MTL MetalShim
+
+// END OF INJECTED CODE
+
+// --- STEP 2: Compiler finally starts reading main.cpp ---
+#define MTL_PRIVATE_IMPLEMENTATION // 2. You provide the password here but its useless.
+#include <Metal/Metal.hpp>         // 3. Compiler says: "I already read Metal.hpp in Step 1! Skipping!"
+```
+
+so these are the following constraints:
+- Original cpp code written by user cannot be modified.
+- I have to include MTL_PRIVATE_IMPLEMENTATION somewhere or else the linker will fail.
+- I have to include the MTL_PRIVATE_IMPLEMENTATION before the actual #include <Metal/Metal.hpp> or else its useless.
+- There should be exactly one .o file generated that has the apple metal objects.
+- You cannot include the same header twice because of header guards/compilation errors, etc,.
+
+So the only natural solution is to create another translation unit that inherits all the metal implementation and generates the .o file. All subsequent files that depend on metal objects will refer to this file via the linker.
+
+
+This is called "STB-Style" Header Pattern developed by a guy who developed library for graphics and now its used everywhere.

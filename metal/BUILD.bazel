@@ -21,6 +21,7 @@ cc_binary(
 
 cc_library(
     name = "metal_shim",
+    srcs = ["metal_impl.cpp"],
     hdrs = ["metal_shim.h"],
     deps = ["//third_party/metal-cpp"],
 )
