@@ -1,3 +1,4 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 # Local vector-add sample: dispatches on the real GPU, no networking involved.
@@ -7,6 +8,19 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 cc_binary(
     name = "adder",
     srcs = ["main.cpp"],
+    copts = [
+        "-include",
+        "metal/metal_shim.h",
+    ],
     data = ["add.metal"],
+    deps = [
+        ":metal_shim",
+        "//third_party/metal-cpp",
+    ],
+)
+
+cc_library(
+    name = "metal_shim",
+    hdrs = ["metal_shim.h"],
     deps = ["//third_party/metal-cpp"],
 )
