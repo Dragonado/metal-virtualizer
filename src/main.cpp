@@ -26,7 +26,7 @@ class Adder {
         // Metal code is added at run time. Under `bazel run` the cwd is the
         // runfiles root, so the shader sits at metal/add.metal; fall back to
         // the bare name when running from inside metal/ directly.
-        std::ifstream f("metal/add.metal");
+        std::ifstream f("src/add.metal");
         if (!f.is_open()) {
             f.open("add.metal");
         }

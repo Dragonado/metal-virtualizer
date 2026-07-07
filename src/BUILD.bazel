@@ -1,32 +1,19 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 
-# Both binaries link the generated gRPC library (which carries the messages via
-# its deps) and the grpc++ runtime. In the .cpp files, include:
-#   #include "proto/tnrc.pb.h"        // tnrc::HelloRequest / tnrc::HelloResponse
-#   #include "proto/tnrc.grpc.pb.h"   // tnrc::TnrcService::Service / ::Stub
-#   #include <grpcpp/grpcpp.h>        // grpc::ServerBuilder, grpc::CreateChannel
-
+# Local vector-add sample: dispatches on the real GPU, no networking involved.
+# add.metal is compiled at runtime via newLibrary(source), so it ships as a
+# plain data file, not a build step. Under `bazel run` the cwd is the runfiles
+# root, so main.cpp loads it as "metal/add.metal".
 cc_binary(
-    name = "server",
-    srcs = ["server.cpp"],
-    deps = [
-        "//proto:tnrc_cc_grpc",
-        "//third_party/metal-cpp",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/flags:parse",
-        "@abseil-cpp//absl/log:initialize",
-        "@abseil-cpp//absl/strings:str_format",
-        "@grpc//:grpc++",
+    name = "adder",
+    srcs = ["main.cpp"],
+    copts = [
+        "-include",
+        "metal/metal_shim.h",
     ],
-)
-
-cc_binary(
-    name = "client",
-    srcs = ["client.cpp"],
+    data = ["add.metal"],
     deps = [
-        "//proto:tnrc_cc_grpc",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/flags:parse",
-        "@grpc//:grpc++",
+        "//metal:metal_shim",
+        "//third_party/metal-cpp",
     ],
 )

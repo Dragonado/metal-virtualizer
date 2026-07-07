@@ -226,3 +226,68 @@ So the only natural solution is to create another translation unit that inherits
 
 
 This is called "STB-Style" Header Pattern developed by a guy who developed library for graphics and now its used everywhere.
+
+## nothing apple survives in the client
+
+Once the shim is finished, the client binary contains: my proxy classes (plain
+C++), a recorded command script, shadow buffers (plain malloc memory), and a
+gRPC stub. The MSL shader source travels as a string and gets compiled
+server-side on the Mac. Nothing Apple-specific survives on the client: no
+Metal.framework, no ObjC runtime, no Apple SDK.
+
+Right now that is false. `otool -L bazel-bin/metal/adder` on the current shim
+shows Metal.framework, Foundation.framework, and libobjc.A.dylib all linked,
+because the current shim delegates in-process: `_realDevice->newCommandQueue()`
+is a real metal-cpp call that emits objc_msgSend into Metal.framework. The
+"nothing apple survives" claim is the end state, after the delegation is replaced
+by serialization. metal-cpp is header-only, so it only drags in Metal.framework
+when you actually call one of its methods. Kill the calls and the linker has
+nothing to resolve against Apple; those three lines fall out of the link map on
+their own.
+
+The reason every piece ends up as plain C++ is one physical fact: there is no
+Apple GPU in the client's laptop. Not "no library", a hardware absence. And it is
+the premise of the whole system, not a constraint I am working around. If the
+client had a usable Apple GPU there would be no reason to remote anything. Every
+plain-C++ property is that single fact propagating outward:
+
+- the shadow buffer is malloc memory because there is no VRAM or unified memory
+  to allocate,
+- the command list is a recording because there is no command queue to submit to,
+- the MSL is a string because there is no GPU to run it and no Metal compiler
+  present to compile it,
+- the proxy holds a handle instead of a device pointer because there is no real
+  device to point at.
+
+So MTL:: cannot exist in the client for the most basic reason possible. Device,
+Buffer, CommandQueue, Encoder, PipelineState, Library are all handles onto GPU
+state, and there is no GPU to hold that state. Not a linking problem, a hardware
+problem.
+
+The subtle part is the boundary where that argument stops. NS:: is not a GPU
+thing. NS::String and NS::Error come from Foundation, and Foundation does not
+need a GPU; a GPU-less machine runs it fine. So "no GPU" is airtight for MTL:: and
+says nothing about NS::. NS:: gets shimmed for a different reason: hauling a whole
+Foundation/ObjC stack onto the client just to carry a string and an error code is
+pure dependency cost with no capability gained, and a ten-line std::string-backed
+NS::String does everything the client needs, because the client only ever carries
+these values to serialize them. The ObjC runtime and Foundation are not even
+Apple-exclusive (GNUstep and swift-corelibs-foundation exist on Linux), but
+metal-cpp's NS wrappers are bound to Apple's objc_msgSend ABI, so they would not
+bind to a Linux Foundation anyway. Either way the shim is strictly less work than
+porting a Foundation.
+
+So the clean split, two different kinds of "must not be here":
+
+- MTL:: is shimmed because there is no GPU. Physical, absolute, non-negotiable.
+- NS:: is shimmed because it is a pointless dependency for holding a string.
+  Practical, a judgment call that happens to be obvious.
+
+The payoff is that the finished client links only gRPC, protobuf, libc++, and my
+own code, which means it can be built and run on Linux, on a box that has never
+heard of Apple. The GPU-less tenant is not a crippled Mac, it is a machine with
+no Apple anything. All the Mac-ness is confined to the one server process. Run
+`otool -L` on the finished client and the three Apple lines are gone, having
+moved to the server binary. That relocation, not elimination, is the actual
+trick: confine every scrap of Apple to one process on one Mac, and hand everyone
+else a plain-C++ view of it over the wire.

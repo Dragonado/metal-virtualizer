@@ -1,21 +1,19 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 
-# Local vector-add sample: dispatches on the real GPU, no networking involved.
-# add.metal is compiled at runtime via newLibrary(source), so it ships as a
-# plain data file, not a build step. Under `bazel run` the cwd is the runfiles
-# root, so main.cpp loads it as "metal/add.metal".
+package(default_visibility = ["//visibility:public"])
+
 cc_binary(
-    name = "adder",
-    srcs = ["main.cpp"],
-    copts = [
-        "-include",
-        "metal/metal_shim.h",
-    ],
-    data = ["add.metal"],
+    name = "server",
+    srcs = ["server.cpp"],
     deps = [
-        ":metal_shim",
+        "//proto:tnrc_cc_grpc",
         "//third_party/metal-cpp",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/flags:parse",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings:str_format",
+        "@grpc//:grpc++",
     ],
 )
 
@@ -23,5 +21,13 @@ cc_library(
     name = "metal_shim",
     srcs = ["metal_impl.cpp"],
     hdrs = ["metal_shim.h"],
-    deps = ["//third_party/metal-cpp"],
+    deps = [
+        "//proto:tnrc_cc_grpc",
+        "//third_party/metal-cpp",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/flags:parse",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings:str_format",
+        "@grpc//:grpc++",
+    ],
 )
