@@ -2,12 +2,11 @@ syntax = "proto3";
 package tnrc;
 
 service TnrcService {
-  rpc Hello(HelloRequest) returns (HelloResponse);
+  rpc CreateSystemDefaultDeviceShim(CreateSystemDefaultDeviceShimRequest) returns (CreateSystemDefaultDeviceShimResponse);
 }
 
-message HelloRequest {
-  string name = 1;
-}
-message HelloResponse {
-  string message = 1;
+message CreateSystemDefaultDeviceShimRequest {}
+
+message CreateSystemDefaultDeviceShimResponse {
+  uint32 gpu_id = 1;
 }

@@ -1,3 +1,9 @@
+#define NS_PRIVATE_IMPLEMENTATION
+#define MTL_PRIVATE_IMPLEMENTATION
+
+#include <Foundation/Foundation.hpp>
+#include <Metal/Metal.hpp>
+
 #include <grpcpp/grpcpp.h>
 #include <iostream>
 #include <memory>
@@ -14,25 +20,45 @@ using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
-using tnrc::HelloRequest;
-using tnrc::HelloResponse;
+using grpc::StatusCode;
+using tnrc::CreateSystemDefaultDeviceShimRequest;
+using tnrc::CreateSystemDefaultDeviceShimResponse;
 using tnrc::TnrcService;
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
 // Logic and data behind the server's behavior.
-class GreeterServiceImpl final : public TnrcService::Service {
-    Status Hello(ServerContext *context, const HelloRequest *request,
-                 HelloResponse *response) override {
-        std::string prefix("Hello ");
-        response->set_message(prefix + request->name());
+class ShimmerImpl final : public TnrcService::Service {
+  public:
+    ShimmerImpl() {
+        counter_ = 0;
+    }
+    Status CreateSystemDefaultDeviceShim(ServerContext *context, const CreateSystemDefaultDeviceShimRequest *request, CreateSystemDefaultDeviceShimResponse *response) override {
+        MTL::Device *device;
+        device = MTL::CreateSystemDefaultDevice();
+        if (device == nullptr) {
+            return Status(StatusCode::INTERNAL, "Could not create metal device.");
+        }
+        device_map_[++counter_] = device;
+        response->set_gpu_id(counter_);
         return Status::OK;
     }
+
+    ~ShimmerImpl() {
+        for (auto &[id, device] : device_map_) {
+            if (device != nullptr)
+                device->release();
+        }
+    }
+
+  private:
+    uint32_t counter_;
+    std::map<uint32_t, MTL::Device *> device_map_;
 };
 
 void RunServer(uint16_t port) {
     std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
-    GreeterServiceImpl service;
+    ShimmerImpl service;
 
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());

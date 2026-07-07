@@ -8,61 +8,55 @@
 namespace MetalShim {
 using namespace MTL;
 
-class CommandQueue;
-class LibraryShim;
+// class CommandQueue;
+// class LibraryShim;
 
-class CommandQueue {
-  private:
-    MTL::CommandQueue *_realQueue;
+// class CommandQueue {
+//   private:
+//     MTL::CommandQueue *_realQueue;
 
-  public:
-    CommandQueue(MTL::CommandQueue *real) : _realQueue(real) {}
+//   public:
+//     CommandQueue(MTL::CommandQueue *real) : _realQueue(real) {}
 
-    MTL::CommandBuffer *commandBuffer() {
-        std::cout << "[SHIM] Intercepted: Creating Command Buffer" << std::endl;
-        return _realQueue->commandBuffer();
-    }
+//     MTL::CommandBuffer *commandBuffer() {
+//         std::cout << "[SHIM] Intercepted: Creating Command Buffer" << std::endl;
+//         return _realQueue->commandBuffer();
+//     }
 
-    void release() {
-        _realQueue->release();
-    }
-};
+//     void release() {
+//         _realQueue->release();
+//     }
+// };
 
 class Device {
   private:
-    MTL::Device *_realDevice;
+    uint32_t device_id_;
 
   public:
-    Device(MTL::Device *real) : _realDevice(real) {}
+    Device(uint32_t device_id) : device_id_(device_id) {}
 
-    CommandQueue *newCommandQueue() {
-        std::cout << "[SHIM] Intercepted: newCommandQueue()" << std::endl;
-        return new CommandQueue(_realDevice->newCommandQueue());
-    }
+    // CommandQueue *newCommandQueue() {
+    //     std::cout << "[SHIM] Intercepted: newCommandQueue()" << std::endl;
+    //     return new CommandQueue(_realDevice->newCommandQueue());
+    // }
 
-    // Intercepting the dynamic loading of your add.metal file
-    MTL::Library *newLibrary(const NS::String *source, const MTL::CompileOptions *options, NS::Error **error) {
-        std::cout << "[SHIM] Intercepted: Compiling dynamically loaded .metal source!" << std::endl;
-        // You could even print/modify the 'source' string here before passing it to the real Metal API
-        return _realDevice->newLibrary(source, options, error);
-    }
+    // // Intercepting the dynamic loading of your add.metal file
+    // MTL::Library *newLibrary(const NS::String *source, const MTL::CompileOptions *options, NS::Error **error) {
+    //     std::cout << "[SHIM] Intercepted: Compiling dynamically loaded .metal source!" << std::endl;
+    //     // You could even print/modify the 'source' string here before passing it to the real Metal API
+    //     return _realDevice->newLibrary(source, options, error);
+    // }
 
-    MTL::Buffer *newBuffer(NS::UInteger length, MTL::ResourceOptions options) {
-        return _realDevice->newBuffer(length, options);
-    }
+    // MTL::Buffer *newBuffer(NS::UInteger length, MTL::ResourceOptions options) {
+    //     return _realDevice->newBuffer(length, options);
+    // }
 
-    MTL::ComputePipelineState *newComputePipelineState(const MTL::Function *computeFunction, NS::Error **error) {
-        return _realDevice->newComputePipelineState(computeFunction, error);
-    }
-    // Add other device methods your adder uses (like newBufferWithLength)...
+    // MTL::ComputePipelineState *newComputePipelineState(const MTL::Function *computeFunction, NS::Error **error) {
+    //     return _realDevice->newComputePipelineState(computeFunction, error);
+    // }
 };
 
-inline Device *
-CreateSystemDefaultDevice() {
-    std::cout << "[SHIM] Intercepted: MTL::CreateSystemDefaultDevice()" << std::endl;
-    MTL::Device *realDevice = MTL::CreateSystemDefaultDevice();
-    return new Device(realDevice);
-}
+Device *CreateSystemDefaultDevice();
 
 } // namespace MetalShim
 
