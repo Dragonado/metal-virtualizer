@@ -95,6 +95,51 @@ GPU-less tenants each think they own the card. The distance between how many
 handles clients hold (many) and how many GPUs exist (one) is the whole space the
 system operates in.
 
+## This is Metal remoting, not the existing container-GPU paths
+
+There are already good ways to accelerate llama.cpp from a Linux container on
+an Apple Silicon Mac. They are useful comparisons, but they solve at a different
+layer than this project.
+
+| Path | Remoted interface | What runs in the guest/client | What the host ultimately runs | Difference from this project |
+| --- | --- | --- | --- | --- |
+| Podman/libkrun GPU path | Vulkan | A Vulkan application, including llama.cpp's Vulkan backend | Vulkan is forwarded through Venus/virglrenderer and translated by MoltenVK to Metal | General virtual-GPU plumbing, but the application must speak Vulkan; Metal is an implementation detail below the guest API. |
+| GGML-VirtGPU / APIR | GGML backend operations: buffers, tensors, and graph execution | llama.cpp or another GGML application | The host can load `ggml-metal` and execute the graph on the Apple GPU | A narrow, efficient LLM/tensor remoting ABI, not an implementation of the Metal API. |
+| llama.cpp RPC | GGML device and compute operations | llama.cpp on a different machine | A remote `ggml-rpc-server`, optionally backed by Metal | Network-distributed inference, not VM GPU virtualization or a general Metal shim. |
+| This project | `metal-cpp` objects and command recording | A Metal compute program rebuilt against a compatible shim | Native Metal directly | The broadest API target here: it can serve non-GGML custom Metal workloads, but inherits Metal resource, command, synchronization, and coherence semantics. |
+
+The architecture picture makes the distinction concrete:
+
+```text
+this project:       metal-cpp -> shim -> wire -> native Metal
+Podman/libkrun:     Linux Vulkan -> VirtGPU/Venus -> host Vulkan -> MoltenVK -> Metal
+GGML-VirtGPU/APIR:  GGML -> VirtGPU/APIR -> ggml-metal -> Metal
+```
+
+`virtio-gpu` (often shortened to VirtGPU in this discussion) is the virtual
+device and shared-memory transport exposed to a Linux guest. API Remoting
+(APIR) is the protocol layer that can carry a higher-level API across that
+device boundary. Podman is the container tool; on macOS it uses a Linux VM, and
+libkrun/krunkit provides that VM's virtual hardware. None of these is itself a
+Metal API implementation.
+
+This gives the post an honest positioning: the project is not claiming to be
+the first route from a Linux workload to an Apple GPU. Its point is to explore
+the *Metal* factory/record/execute boundary directly, instead of accepting the
+semantics of Vulkan or narrowing the interface to GGML. That choice buys a
+native-Metal server and generality; it also makes the implementation surface
+much larger. For a llama.cpp-only product, GGML-VirtGPU is the more sensible
+seam. For a generic Metal-remoting experiment, it is precisely the wrong seam.
+
+The milestone that matters is not one remote vector add. It is **two
+independent GPU-less Metal tenants, no source changes beyond rebuilding with the
+shim, correct results, and measurable better total throughput/latency than naive
+whole-job serialization.**
+
+References: [Podman macOS GPU path](https://podman-desktop.io/docs/podman/gpu),
+[GGML-VirtGPU backend](https://android.googlesource.com/platform/external/ggml-org/llama.cpp/%2B/refs/tags/studio-2026.1.1/docs/backend/VirtGPU.md),
+and [llama.cpp RPC](https://github.com/ggml-org/llama.cpp/blob/master/tools/rpc/README.md).
+
 ## Why I cannot transparently intercept Metal the way Thunder intercepts CUDA
 
 Thunder can run an already-compiled, unmodified CUDA binary against a remote
