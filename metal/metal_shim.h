@@ -30,7 +30,12 @@ using namespace MTL;
 
 class CommandQueue {
   public:
+    CommandQueue(uint32_t command_queue_id) : command_queue_id_(command_queue_id) {}
+
     void release();
+
+  private:
+    uint32_t command_queue_id_;
 };
 
 class Device {

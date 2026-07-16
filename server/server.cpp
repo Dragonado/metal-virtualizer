@@ -24,6 +24,8 @@ using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
 using grpc::StatusCode;
+using tnrc::CreateCommandQueueShimRequest;
+using tnrc::CreateCommandQueueShimResponse;
 using tnrc::CreateSystemDefaultDeviceShimRequest;
 using tnrc::CreateSystemDefaultDeviceShimResponse;
 using tnrc::GetDeviceNameShimRequest;
@@ -59,6 +61,17 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
 
+    Status CreateCommandQueueShim(ServerContext *context, const CreateCommandQueueShimRequest *request, CreateCommandQueueShimResponse *response) override {
+        MTL::CommandQueue *command_queue = device_map_[request->device_id()]->newCommandQueue();
+        if (command_queue == nullptr) {
+            return Status(StatusCode::INTERNAL, "Could not create command queue.");
+        }
+        counter_++;
+        command_queue_map_[counter_] = command_queue;
+        response->set_command_queue_id(counter_);
+        return Status::OK;
+    }
+
     ~ShimmerImpl() {
         for (auto &[id, device] : device_map_) {
             if (device != nullptr)
@@ -69,6 +82,7 @@ class ShimmerImpl final : public TnrcService::Service {
   private:
     uint32_t counter_;
     std::map<uint32_t, MTL::Device *> device_map_;
+    std::map<uint32_t, MTL::CommandQueue *> command_queue_map_;
 };
 
 void RunServer(uint16_t port) {

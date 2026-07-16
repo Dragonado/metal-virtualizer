@@ -15,6 +15,8 @@
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
+using tnrc::CreateCommandQueueShimRequest;
+using tnrc::CreateCommandQueueShimResponse;
 using tnrc::CreateSystemDefaultDeviceShimRequest;
 using tnrc::CreateSystemDefaultDeviceShimResponse;
 using tnrc::GetDeviceNameShimRequest;
@@ -63,23 +65,23 @@ class TnrcServiceClient {
         }
     }
 
-    // CommandQueue CreateCommandQueue(uint32_t device_id) {
-    //     GetDeviceNameShimRequest request;
-    //     GetDeviceNameShimResponse response;
-    //     ClientContext context;
+    std::optional<uint32_t> CreateCommandQueue(uint32_t device_id) {
+        CreateCommandQueueShimRequest request;
+        CreateCommandQueueShimResponse response;
+        ClientContext context;
 
-    //     request.set_device_id(device_id);
+        request.set_device_id(device_id);
 
-    //     Status status = stub_->GetDeviceNameShim(&context, request, &response);
+        Status status = stub_->CreateCommandQueueShim(&context, request, &response);
 
-    //     if (status.ok()) {
-    //         return NS::String::string(response.name().c_str(), NS::UTF8StringEncoding);
-    //     } else {
-    //         std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
-    //                   << std::endl;
-    //         return nullptr;
-    //     }
-    // }
+        if (status.ok()) {
+            return response.command_queue_id();
+        } else {
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                      << std::endl;
+            return std::nullopt;
+        }
+    }
 
   private:
     std::unique_ptr<TnrcService::Stub> stub_;
@@ -109,7 +111,13 @@ Device *CreateSystemDefaultDevice() {
 }
 
 CommandQueue *Device::newCommandQueue() {
-    return (new CommandQueue());
+    std::optional<uint32_t> command_queue_id = Client().CreateCommandQueue(device_id_);
+
+    if (!command_queue_id.has_value())
+        return nullptr;
+
+    std::cerr << "[SHIM] CommandQueue ID: " << command_queue_id.value() << std::endl;
+    return new CommandQueue(command_queue_id.value());
 }
 
 void CommandQueue::release() {
