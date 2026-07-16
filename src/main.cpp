@@ -8,8 +8,8 @@
 #include "Foundation/Foundation.hpp"
 #include "Metal/Metal.hpp"
 
-constexpr size_t MAXN = 100;
-constexpr float EPS = 1e-5;
+// constexpr size_t MAXN = 100;
+// constexpr float EPS = 1e-5;
 
 class Adder {
   public:
