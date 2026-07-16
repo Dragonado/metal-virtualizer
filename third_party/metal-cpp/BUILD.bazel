@@ -3,14 +3,15 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 package(default_visibility = ["//visibility:public"])
 
 # Vendored Apple metal-cpp headers (C++ wrappers over Metal's ObjC API).
+# Headers and frameworks ONLY — no implementation TU. Every binary must get
+# the NS_/MTL_PRIVATE_IMPLEMENTATION symbols from exactly one place: either
+# dep on :foundation-impl (clients) or define the macros in one of its own
+# TUs (server, GPU-mode adder). Never both.
 # `includes` exports this directory as -isystem, so consumers write
 # #include "Metal/Metal.hpp" and metal-cpp's own header warnings stay quiet.
 # The frameworks are linkopts here so every consumer links them transitively.
-# impl.cpp emits the Foundation implementation only; Metal's implementation is
-# deliberately absent from client binaries (see impl.cpp).
 cc_library(
     name = "metal-cpp",
-    srcs = ["impl.cpp"],
     hdrs = glob(["**/*.hpp"]),
     includes = ["."],
     linkopts = [
@@ -19,4 +20,14 @@ cc_library(
         "-framework",
         "Foundation",
     ],
+)
+
+# Foundation implementation TU (NS_PRIVATE_IMPLEMENTATION), opt-in. The shim
+# library deps on this so client binaries get NS::String machinery while
+# Metal's implementation stays deliberately absent: any client call escaping
+# the shim to real local Metal fails at link. See impl.cpp.
+cc_library(
+    name = "foundation-impl",
+    srcs = ["impl.cpp"],
+    deps = [":metal-cpp"],
 )

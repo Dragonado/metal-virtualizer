@@ -7,6 +7,6 @@ refresh_compile_commands(
     targets = {
         "//src:adder": "",
         "//metal:metal_shim": "",
-        "//metal:server": "",
+        "//server:server": "",
     },
 )

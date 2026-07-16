@@ -163,7 +163,7 @@ constexpr float EPS = 1e-5;
 int main() {
 
     MTL::Device *device = MTL::CreateSystemDefaultDevice();
-    std::cout << "Name = " << device->name() << std::endl;
+    std::cout << "Name = " << device->name()->cString(NS::UTF8StringEncoding) << std::endl;
     assert(device != nullptr);
     // Adder *adder = Adder::create(device);
     // adder->prepareData();

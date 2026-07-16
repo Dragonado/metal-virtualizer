@@ -1,5 +1,7 @@
-// NS_PRIVATE_IMPLEMENTATION lives in //third_party/metal-cpp:impl.cpp;
-// defining it here too would duplicate the Foundation symbols at link.
+// The server is standalone: it emits BOTH implementation halves in this TU
+// (it does not dep on //third_party/metal-cpp:foundation-impl, which exists
+// for client binaries where Metal's impl is deliberately absent).
+#define NS_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION
 
 #include <Foundation/Foundation.hpp>

@@ -1,0 +1,20 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+# Standalone GPU-owning server: holds the real Metal device and serves the
+# shim's RPCs. Deliberately separate from metal/ (the client-side shim); the
+# two share nothing but the proto contract. Emits both NS_ and MTL_
+# implementation halves in its own TU (see server.cpp), so it does NOT dep on
+# //third_party/metal-cpp:foundation-impl.
+cc_binary(
+    name = "server",
+    srcs = ["server.cpp"],
+    deps = [
+        "//proto:tnrc_cc_grpc",
+        "//third_party/metal-cpp",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/flags:parse",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings:str_format",
+        "@grpc//:grpc++",
+    ],
+)

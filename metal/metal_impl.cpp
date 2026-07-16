@@ -39,7 +39,7 @@ class TnrcServiceClient {
         if (status.ok()) {
             return response.gpu_id();
         } else {
-            std::cerr << "ERROR: " << status.error_code() << ": " << status.error_message()
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
                       << std::endl;
             return std::nullopt;
         }
@@ -57,7 +57,7 @@ class TnrcServiceClient {
         if (status.ok()) {
             return NS::String::string(response.name().c_str(), NS::UTF8StringEncoding);
         } else {
-            std::cerr << "ERROR: " << status.error_code() << ": " << status.error_message()
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
                       << std::endl;
             return nullptr;
         }
@@ -86,7 +86,7 @@ Device *CreateSystemDefaultDevice() {
     if (!device_id.has_value())
         return nullptr;
 
-    std::cerr << "GPU ID: " << device_id.value() << std::endl;
+    std::cerr << "[SHIM] GPU ID: " << device_id.value() << std::endl;
     return new Device(device_id.value());
 }
 

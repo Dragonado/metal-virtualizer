@@ -1,21 +1,6 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 package(default_visibility = ["//visibility:public"])
-
-cc_binary(
-    name = "server",
-    srcs = ["server.cpp"],
-    deps = [
-        "//proto:tnrc_cc_grpc",
-        "//third_party/metal-cpp",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/flags:parse",
-        "@abseil-cpp//absl/log:initialize",
-        "@abseil-cpp//absl/strings:str_format",
-        "@grpc//:grpc++",
-    ],
-)
 
 cc_library(
     name = "metal_shim",
@@ -27,6 +12,7 @@ cc_library(
     deps = [
         "//proto:tnrc_cc_grpc",
         "//third_party/metal-cpp",
+        "//third_party/metal-cpp:foundation-impl",
         "@grpc//:grpc++",
     ],
 )
