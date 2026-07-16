@@ -11,21 +11,23 @@ Build plan: [docs/TODO.md](docs/TODO.md).
 ## Layout
 
 - `proto/` - gRPC wire contract
-- `src/` - server (owns the real GPU) and client
-- `metal/` - local Metal sample workload (vector add)
+- `server/` - Hosted server with real GPU
+- `src/` - client code
 - `third_party/metal-cpp/` - vendored Apple metal-cpp headers
-- `docs/` - steering doc, build plan, notes
+- `docs/` - steering doc, build plan, blog notes
 
 ## Build and run
 
 Everything builds with Bazel:
 
 ```sh
-bazel build //...
+bazel run //server:server    # Host the gRPC server with the GPU
+```
 
-bazel run //metal:adder    # vector add on the local GPU
-bazel run //src:server     # gRPC server
-bazel run //src:client     # gRPC client (expects a running server)
+In a new terminal
+
+```sh
+bazel run //src:adder     # Run client code (which is automatically hijacked by shim)
 ```
 
 Editor IntelliSense (regenerates compile_commands.json):
