@@ -15,13 +15,8 @@
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
-using tnrc::CreateCommandQueueShimRequest;
-using tnrc::CreateCommandQueueShimResponse;
-using tnrc::CreateSystemDefaultDeviceShimRequest;
-using tnrc::CreateSystemDefaultDeviceShimResponse;
-using tnrc::GetDeviceNameShimRequest;
-using tnrc::GetDeviceNameShimResponse;
-using tnrc::TnrcService;
+
+using namespace tnrc;
 
 namespace MetalShim {
 
@@ -83,6 +78,87 @@ class TnrcServiceClient {
         }
     }
 
+    std::optional<uint32_t> CreateLibrary(uint32_t device_id, const NS::String *source, const CompileOptions *options, NS::Error **error) {
+        CreateLibraryShimRequest request;
+        CreateLibraryShimResponse response;
+        ClientContext context;
+
+        request.set_device_id(device_id);
+        request.set_source(source->cString(NS::UTF8StringEncoding));
+
+        // TODO: Add options and error.
+
+        Status status = stub_->CreateLibraryShim(&context, request, &response);
+
+        if (status.ok()) {
+            return response.library_id();
+        } else {
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                      << std::endl;
+            return std::nullopt;
+        }
+    }
+
+    std::optional<uint32_t> CreateFunction(uint32_t device_id, const NS::String *function_name) {
+        CreateFunctionShimRequest request;
+        CreateFunctionShimResponse response;
+        ClientContext context;
+
+        request.set_library_id(device_id);
+        request.set_function_name(function_name->cString(NS::UTF8StringEncoding));
+
+        // TODO: Add options and error.
+
+        Status status = stub_->CreateFunctionShim(&context, request, &response);
+
+        if (status.ok()) {
+            return response.function_id();
+        } else {
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                      << std::endl;
+            return std::nullopt;
+        }
+    }
+
+    bool ReleaseFunction(uint32_t function_id) {
+        ReleaseFunctionShimRequest request;
+        ReleaseFunctionShimResponse response;
+        ClientContext context;
+
+        request.set_function_id(function_id);
+
+        Status status = stub_->ReleaseFunctionShim(&context, request, &response);
+
+        if (status.ok()) {
+            return true;
+        }
+
+        std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                  << std::endl;
+        return false;
+    }
+
+    std::optional<uint32_t> CreateComputePipelineState(uint32_t device_id, const Function *func, NS::Error **error) {
+        CreateComputePipelineStateShimRequest request;
+        CreateComputePipelineStateShimResponse response;
+        ClientContext context;
+
+        request.set_device_id(device_id);
+        request.set_function_id(func->get_function_id());
+
+        // TODO: Add options and error.
+
+        Status status = stub_->CreateComputePipelineStateShim(&context, request, &response);
+
+        if (status.ok()) {
+            return response.compute_pipeline_state_id();
+        } else {
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                      << std::endl;
+            return std::nullopt;
+        }
+    }
+
   private:
     std::unique_ptr<TnrcService::Stub> stub_;
 };
@@ -120,7 +196,54 @@ CommandQueue *Device::newCommandQueue() {
     return new CommandQueue(command_queue_id.value());
 }
 
+// TODO: Make rpc call.
 void CommandQueue::release() {
 }
+
+Library *Device::newLibrary(const NS::String *source, const CompileOptions *options, NS::Error **error) {
+    std::optional<uint32_t> library_id = Client().CreateLibrary(device_id_, source, options, error);
+
+    if (!library_id.has_value()) {
+        return nullptr;
+    }
+
+    std::cerr << "[SHIM] Library ID: " << library_id.value() << std::endl;
+    return new Library(library_id.value());
+}
+
+Function *Library::newFunction(const NS::String *function_name) {
+    std::optional<uint32_t> function_id = Client().CreateFunction(library_id_, function_name);
+
+    if (!function_id.has_value()) {
+        return nullptr;
+    }
+
+    std::cerr << "[SHIM] Function ID: " << function_id.value() << std::endl;
+    return new Function(function_id.value());
+}
+
+// TODO: Make rpc call.
+void Library::release() {}
+
+void Function::release() {
+    if (Client().ReleaseFunction(function_id_)) {
+        delete this;
+    }
+}
+
+ComputePipelineState *Device::newComputePipelineState(const Function *func, NS::Error **error) {
+    std::optional<uint32_t> compute_pipeline_state_id = Client().CreateComputePipelineState(device_id_, func, error);
+
+    if (!compute_pipeline_state_id.has_value()) {
+        return nullptr;
+    }
+
+    std::cerr << "[SHIM] ComputePipelineState ID: " << compute_pipeline_state_id.value() << std::endl;
+    return new ComputePipelineState(compute_pipeline_state_id.value());
+}
+
+// TODO: Make rpc call.
+
+void ComputePipelineState::release() {}
 
 } // namespace MetalShim

@@ -26,41 +26,41 @@ class Adder {
         // Metal code is added at run time. Under `bazel run` the cwd is the
         // runfiles root, so the shader sits at metal/add.metal; fall back to
         // the bare name when running from inside metal/ directly.
-        // std::ifstream f("src/add.metal");
-        // if (!f.is_open()) {
-        //     f.open("add.metal");
-        // }
-        // if (!f.is_open()) {
-        //     std::cerr << "ERROR: cannot find add.metal" << '\n';
-        //     exit(1);
-        // }
-        // std::string src((std::istreambuf_iterator<char>(f)), {});
-        // MTL::Library *library = device_->newLibrary(
-        //     NS::String::string(src.c_str(), NS::UTF8StringEncoding), nullptr, &err);
+        std::ifstream f("src/add.metal");
+        if (!f.is_open()) {
+            f.open("add.metal");
+        }
+        if (!f.is_open()) {
+            std::cerr << "ERROR: cannot find add.metal" << '\n';
+            exit(1);
+        }
+        std::string src((std::istreambuf_iterator<char>(f)), {});
+        MTL::Library *library = device_->newLibrary(
+            NS::String::string(src.c_str(), NS::UTF8StringEncoding), nullptr, &err);
 
-        // if (library == NULL) {
-        //     std::cerr << "ERROR: library compile failed: "
-        //               << err->localizedDescription()->utf8String() << '\n';
-        //     exit(1);
-        // }
+        if (library == NULL) {
+            std::cerr << "ERROR: library compile failed: "
+                      << err->localizedDescription()->utf8String() << '\n';
+            exit(1);
+        }
 
-        // MTL::Function *add_func = library->newFunction(NS::String::string("add_arrays", NS::UTF8StringEncoding));
+        MTL::Function *add_func = library->newFunction(NS::String::string("add_arrays", NS::UTF8StringEncoding));
 
-        // if (add_func == NULL) {
-        //     std::cerr << "ERROR: Failed to find add function in the metal code: " << std::endl;
-        //     exit(1);
-        // }
+        if (add_func == NULL) {
+            std::cerr << "ERROR: Failed to find add function in the metal code: " << std::endl;
+            exit(1);
+        }
 
-        // add_pso_ = device_->newComputePipelineState(add_func, &err);
+        add_pso_ = device_->newComputePipelineState(add_func, &err);
 
-        // if (add_pso_ == NULL) {
-        //     std::cerr << "ERROR: Failed to create pipeline state object: "
-        //               << err->localizedDescription()->utf8String() << '\n';
-        //     exit(1);
-        // }
+        if (add_pso_ == NULL) {
+            std::cerr << "ERROR: Failed to create pipeline state object: "
+                      << err->localizedDescription()->utf8String() << '\n';
+            exit(1);
+        }
 
-        // add_func->release();
-        // library->release();
+        add_func->release();
+        library->release();
 
         return this;
     }
@@ -80,6 +80,15 @@ class Adder {
     //     command_buffer->waitUntilCompleted();
     // }
 
+    ~Adder() {
+        // buffer_a_->release();
+        // buffer_b_->release();
+        // buffer_c_->release();
+        add_pso_->release();
+        queue_->release();
+    }
+
+  private:
     // void encodeAddCommand(MTL::ComputeCommandEncoder *encoder) {
     //     encoder->setComputePipelineState(add_pso_);
     //     encoder->setBuffer(buffer_a_, 0, 0);
@@ -102,14 +111,6 @@ class Adder {
     //     populate_random_float(buffer_a_, MAXN);
     //     populate_random_float(buffer_b_, MAXN);
     // }
-
-    ~Adder() {
-        // buffer_a_->release();
-        // buffer_b_->release();
-        // buffer_c_->release();
-        // add_pso_->release();
-        queue_->release();
-    }
 
     // void verify() {
     //     float *a = (float *)buffer_a_->contents();
@@ -139,7 +140,6 @@ class Adder {
     //     std::cout << "OK: Computation is correct" << std::endl;
     // }
 
-  private:
     // void populate_random_float(MTL::Buffer *b, size_t n) {
     //     std::random_device rd;
     //     std::mt19937 gen(rd());
@@ -156,7 +156,7 @@ class Adder {
     MTL::Device *device_;
 
     MTL::CommandQueue *queue_;
-    // MTL::ComputePipelineState *add_pso_;
+    MTL::ComputePipelineState *add_pso_;
     // MTL::Buffer *buffer_a_, *buffer_b_, *buffer_c_;
 };
 

@@ -24,13 +24,8 @@ using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
 using grpc::StatusCode;
-using tnrc::CreateCommandQueueShimRequest;
-using tnrc::CreateCommandQueueShimResponse;
-using tnrc::CreateSystemDefaultDeviceShimRequest;
-using tnrc::CreateSystemDefaultDeviceShimResponse;
-using tnrc::GetDeviceNameShimRequest;
-using tnrc::GetDeviceNameShimResponse;
-using tnrc::TnrcService;
+
+using namespace tnrc;
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -72,6 +67,55 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
 
+    Status CreateLibraryShim(ServerContext *context, const CreateLibraryShimRequest *request, CreateLibraryShimResponse *response) override {
+        NS::Error *err;
+        MTL::Library *library = device_map_[request->device_id()]->newLibrary(
+            NS::String::string(request->source().c_str(), NS::UTF8StringEncoding), nullptr, &err);
+        if (library == nullptr) {
+            return Status(StatusCode::INTERNAL, "Could not create library");
+        }
+        counter_++;
+        library_map_[counter_] = library;
+        response->set_library_id(counter_);
+        return Status::OK;
+    }
+
+    Status CreateFunctionShim(ServerContext *context, const CreateFunctionShimRequest *request, CreateFunctionShimResponse *response) override {
+        MTL::Function *function = library_map_[request->library_id()]->newFunction(
+            NS::String::string(request->function_name().c_str(), NS::UTF8StringEncoding));
+        if (function == nullptr) {
+            return Status(StatusCode::INTERNAL, "Could not create function");
+        }
+        counter_++;
+        function_map_[counter_] = function;
+        response->set_function_id(counter_);
+        return Status::OK;
+    }
+
+    Status ReleaseFunctionShim(ServerContext *context, const ReleaseFunctionShimRequest *request, ReleaseFunctionShimResponse *response) override {
+        auto function = function_map_.find(request->function_id());
+        if (function == function_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find function.");
+        }
+
+        function->second->release();
+        function_map_.erase(function);
+        return Status::OK;
+    }
+
+    Status CreateComputePipelineStateShim(ServerContext *context, const CreateComputePipelineStateShimRequest *request, CreateComputePipelineStateShimResponse *response) override {
+        NS::Error *err;
+        MTL::ComputePipelineState *compute_pipeline_state = device_map_[request->device_id()]->newComputePipelineState(
+            function_map_[request->function_id()], &err);
+        if (compute_pipeline_state == nullptr) {
+            return Status(StatusCode::INTERNAL, "Could not create compute_pipeline_state");
+        }
+        counter_++;
+        compute_pipeline_state_map_[counter_] = compute_pipeline_state;
+        response->set_compute_pipeline_state_id(counter_);
+        return Status::OK;
+    }
+
     ~ShimmerImpl() {
         for (auto &[id, device] : device_map_) {
             if (device != nullptr)
@@ -83,6 +127,9 @@ class ShimmerImpl final : public TnrcService::Service {
     uint32_t counter_;
     std::map<uint32_t, MTL::Device *> device_map_;
     std::map<uint32_t, MTL::CommandQueue *> command_queue_map_;
+    std::map<uint32_t, MTL::Library *> library_map_;
+    std::map<uint32_t, MTL::Function *> function_map_;
+    std::map<uint32_t, MTL::ComputePipelineState *> compute_pipeline_state_map_;
 };
 
 void RunServer(uint16_t port) {

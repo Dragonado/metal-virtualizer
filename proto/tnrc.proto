@@ -5,6 +5,10 @@ service TnrcService {
   rpc CreateSystemDefaultDeviceShim(CreateSystemDefaultDeviceShimRequest) returns (CreateSystemDefaultDeviceShimResponse);
   rpc GetDeviceNameShim(GetDeviceNameShimRequest) returns (GetDeviceNameShimResponse);
   rpc CreateCommandQueueShim(CreateCommandQueueShimRequest) returns (CreateCommandQueueShimResponse);
+  rpc CreateLibraryShim(CreateLibraryShimRequest) returns (CreateLibraryShimResponse);
+  rpc CreateFunctionShim(CreateFunctionShimRequest) returns (CreateFunctionShimResponse);
+  rpc ReleaseFunctionShim(ReleaseFunctionShimRequest) returns (ReleaseFunctionShimResponse);
+  rpc CreateComputePipelineStateShim(CreateComputePipelineStateShimRequest) returns (CreateComputePipelineStateShimResponse);
 }
 
 message CreateSystemDefaultDeviceShimRequest {}
@@ -13,8 +17,7 @@ message CreateSystemDefaultDeviceShimResponse {
   uint32 device_id = 1;
 }
 
-
-message GetDeviceNameShimRequest{
+message GetDeviceNameShimRequest {
   uint32 device_id = 1;
 }
 
@@ -22,10 +25,46 @@ message GetDeviceNameShimResponse {
   string name = 1;
 }
 
-message CreateCommandQueueShimRequest{
+message CreateCommandQueueShimRequest {
   uint32 device_id = 1;
 }
 
 message CreateCommandQueueShimResponse {
   uint32 command_queue_id = 1;
+}
+
+message CreateLibraryShimRequest {
+  uint32 device_id = 1;
+  string source = 2;
+  // TODO: Add options and error
+}
+
+message CreateLibraryShimResponse {
+  uint32 library_id = 1;
+}
+
+message CreateFunctionShimRequest {
+  uint32 library_id = 1;
+  string function_name = 2;
+  // TODO: Add options and error
+}
+
+message CreateFunctionShimResponse {
+  uint32 function_id = 1;
+}
+
+message ReleaseFunctionShimRequest {
+  uint32 function_id = 1;
+}
+
+message ReleaseFunctionShimResponse {}
+
+message CreateComputePipelineStateShimRequest {
+  uint32 device_id = 1;
+  uint32 function_id = 2;
+  // TODO: error
+}
+
+message CreateComputePipelineStateShimResponse {
+  uint32 compute_pipeline_state_id = 1;
 }

@@ -6,27 +6,43 @@
 
 // 2. Define your Shim namespace
 namespace MetalShim {
-using namespace MTL;
 
-// class CommandQueue;
-// class LibraryShim;
+using CompileOptions = MTL::CompileOptions;
 
-// class CommandQueue {
-//   private:
-//     MTL::CommandQueue *_realQueue;
+class Function {
+  public:
+    Function(uint32_t function_id) : function_id_(function_id) {}
 
-//   public:
-//     CommandQueue(MTL::CommandQueue *real) : _realQueue(real) {}
+    uint32_t get_function_id() const {
+        return function_id_;
+    }
+    void release();
 
-//     MTL::CommandBuffer *commandBuffer() {
-//         std::cout << "[SHIM] Intercepted: Creating Command Buffer" << std::endl;
-//         return _realQueue->commandBuffer();
-//     }
+  private:
+    uint32_t function_id_;
+};
 
-//     void release() {
-//         _realQueue->release();
-//     }
-// };
+class Library {
+  public:
+    Library(uint32_t library_id) : library_id_(library_id) {}
+
+    Function *newFunction(const NS::String *function_name);
+
+    void release();
+
+  private:
+    uint32_t library_id_;
+};
+
+class ComputePipelineState {
+  public:
+    ComputePipelineState(uint32_t compute_pipeline_state_id) : compute_pipeline_state_id_(compute_pipeline_state_id) {}
+
+    void release();
+
+  private:
+    uint32_t compute_pipeline_state_id_;
+};
 
 class CommandQueue {
   public:
@@ -49,21 +65,9 @@ class Device {
 
     CommandQueue *newCommandQueue();
 
-    // CommandQueue *newCommandQueue() {
-    //     std::cout << "[SHIM] Intercepted: newCommandQueue()" << std::endl;
-    //     return new CommandQueue(_realDevice->newCommandQueue());
-    // }
-
-    // // Intercepting the dynamic loading of your add.metal file
-    // MTL::Library *newLibrary(const NS::String *source, const MTL::CompileOptions *options, NS::Error **error) {
-    //     std::cout << "[SHIM] Intercepted: Compiling dynamically loaded .metal source!" << std::endl;
-    //     // You could even print/modify the 'source' string here before passing it to the real Metal API
-    //     return _realDevice->newLibrary(source, options, error);
-    // }
-
-    // MTL::Buffer *newBuffer(NS::UInteger length, MTL::ResourceOptions options) {
-    //     return _realDevice->newBuffer(length, options);
-    // }
+    // Intercepting the dynamic loading of your add.metal file
+    Library *newLibrary(const NS::String *source, const CompileOptions *options, NS::Error **error);
+    ComputePipelineState *newComputePipelineState(const Function *func, NS::Error **error);
 
     // MTL::ComputePipelineState *newComputePipelineState(const MTL::Function *computeFunction, NS::Error **error) {
     //     return _realDevice->newComputePipelineState(computeFunction, error);
