@@ -63,6 +63,24 @@ class TnrcServiceClient {
         }
     }
 
+    // CommandQueue CreateCommandQueue(uint32_t device_id) {
+    //     GetDeviceNameShimRequest request;
+    //     GetDeviceNameShimResponse response;
+    //     ClientContext context;
+
+    //     request.set_device_id(device_id);
+
+    //     Status status = stub_->GetDeviceNameShim(&context, request, &response);
+
+    //     if (status.ok()) {
+    //         return NS::String::string(response.name().c_str(), NS::UTF8StringEncoding);
+    //     } else {
+    //         std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+    //                   << std::endl;
+    //         return nullptr;
+    //     }
+    // }
+
   private:
     std::unique_ptr<TnrcService::Stub> stub_;
 };
@@ -88,6 +106,13 @@ Device *CreateSystemDefaultDevice() {
 
     std::cerr << "[SHIM] GPU ID: " << device_id.value() << std::endl;
     return new Device(device_id.value());
+}
+
+CommandQueue *Device::newCommandQueue() {
+    return (new CommandQueue());
+}
+
+void CommandQueue::release() {
 }
 
 } // namespace MetalShim

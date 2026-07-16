@@ -28,6 +28,11 @@ using namespace MTL;
 //     }
 // };
 
+class CommandQueue {
+  public:
+    void release();
+};
+
 class Device {
   private:
     uint32_t device_id_;
@@ -36,6 +41,8 @@ class Device {
     Device(uint32_t device_id) : device_id_(device_id) {}
 
     NS::String *name();
+
+    CommandQueue *newCommandQueue();
 
     // CommandQueue *newCommandQueue() {
     //     std::cout << "[SHIM] Intercepted: newCommandQueue()" << std::endl;
