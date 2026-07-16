@@ -48,7 +48,7 @@ class ShimmerImpl final : public TnrcService::Service {
         }
         counter_++;
         device_map_[counter_] = device;
-        response->set_gpu_id(counter_);
+        response->set_device_id(counter_);
         return Status::OK;
     }
 

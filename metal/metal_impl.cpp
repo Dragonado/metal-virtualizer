@@ -39,7 +39,7 @@ class TnrcServiceClient {
         Status status = stub_->CreateSystemDefaultDeviceShim(&context, request, &response);
 
         if (status.ok()) {
-            return response.gpu_id();
+            return response.device_id();
         } else {
             std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
                       << std::endl;
@@ -106,7 +106,7 @@ Device *CreateSystemDefaultDevice() {
     if (!device_id.has_value())
         return nullptr;
 
-    std::cerr << "[SHIM] GPU ID: " << device_id.value() << std::endl;
+    std::cerr << "[SHIM] Device ID: " << device_id.value() << std::endl;
     return new Device(device_id.value());
 }
 

@@ -10,7 +10,7 @@ service TnrcService {
 message CreateSystemDefaultDeviceShimRequest {}
 
 message CreateSystemDefaultDeviceShimResponse {
-  uint32 gpu_id = 1;
+  uint32 device_id = 1;
 }
 
 
@@ -29,4 +29,3 @@ message CreateCommandQueueShimRequest{
 message CreateCommandQueueShimResponse {
   uint32 command_queue_id = 1;
 }
-
