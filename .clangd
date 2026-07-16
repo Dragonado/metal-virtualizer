@@ -11,3 +11,17 @@ CompileFlags:
 Diagnostics:
   UnusedIncludes: None
   MissingIncludes: None
+
+---
+# The shim headers must never be parsed with the client's hijack force-include.
+# compile_commands.json carries a metal_shim.h entry borrowed from main.cpp's TU
+# (which has -include metal/metal_hijack.h). When clangd parses the header as
+# the main file, the hijack's own #include of metal_shim.h is skipped as
+# self-inclusion, leaving #define MTL MetalShim active BEFORE the header's own
+# Metal.hpp include: the real namespace MTL gets rewritten into MetalShim and
+# clangd reports a phantom "redefinition of Device". Strip the force-include
+# when parsing these headers; the real build is unaffected.
+If:
+  PathMatch: metal/metal_.*\.h
+CompileFlags:
+  Remove: [-include]

@@ -227,6 +227,56 @@ So the only natural solution is to create another translation unit that inherits
 
 This is called "STB-Style" Header Pattern developed by a guy who developed library for graphics and now its used everywhere.
 
+## The repo layout is the architecture diagram
+
+After moving the server out of metal/, the directory tree reads as the system
+design. Each top-level folder is one box in the picture, and the dependency
+rules between folders are the arrows:
+
+```
+src/          client program (unmodified Metal code, GPU-less)
+metal/        the shim: hijack header + gRPC proxy impl
+server/       standalone GPU-owning server
+proto/        the only thing shim and server share
+third_party/  metal-cpp headers + opt-in foundation impl
+```
+
+The picture itself:
+
+```
+ +--------+     hijacked      +-------------+
+ | Client | ----------------> | Shim header |
+ +--------+                   +-------------+
+       \_________  __________/       |
+                 \/                   |  separated
+      compiled into ONE binary        |  by network
+                                      v
+                              ~~~~~~~~~~~~~~~~~
+                                gRPC (proto/)
+                              ~~~~~~~~~~~~~~~~~
+                                      |
+                                      v
+                                 +--------+
+                                 | Server |  <- real GPU
+                                 +--------+
+```
+
+Two boundaries, two different kinds of "separate":
+
+- Client and shim are separate *folders* but the same *binary*. The hijack is a
+  compile-time trick (force-included header, `#define MTL MetalShim`), so the
+  client's unmodified source and my proxy classes get welded together by the
+  linker into one executable. src/ never includes metal/ by name; the build
+  system does the splice.
+- Shim and server are separate *processes* on opposite ends of a wire. They
+  share zero code, zero headers, zero linked symbols. The only artifact both
+  sides consume is proto/, the wire contract. Nothing else in the tree is
+  visible across that line.
+
+The folder split earns its keep because you can see the deployment story in
+`ls`: everything above the wavy line ships to the GPU-less tenant, everything
+below it stays on the one Mac that owns the GPU.
+
 ## nothing apple survives in the client
 
 Once the shim is finished, the client binary contains: my proxy classes (plain
