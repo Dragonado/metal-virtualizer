@@ -3,10 +3,20 @@ package tnrc;
 
 service TnrcService {
   rpc CreateSystemDefaultDeviceShim(CreateSystemDefaultDeviceShimRequest) returns (CreateSystemDefaultDeviceShimResponse);
+  rpc GetDeviceNameShim(GetDeviceNameShimRequest) returns (GetDeviceNameShimResponse);
 }
 
 message CreateSystemDefaultDeviceShimRequest {}
 
 message CreateSystemDefaultDeviceShimResponse {
   uint32 gpu_id = 1;
+}
+
+
+message GetDeviceNameShimRequest{
+  uint32 device_id = 1;
+}
+
+message GetDeviceNameShimResponse {
+  string name = 1;
 }

@@ -14,6 +14,9 @@ bazel_dep(name = "protobuf", version = "35.1")
 # reference its targets. Version matches what the graph already resolves.
 bazel_dep(name = "abseil-cpp", version = "20250814.1")
 
+# skylib provides bool_flag for user-defined build settings (//src:shim).
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+
 # grpc provides cc_grpc_library and the grpc++ runtime. It transitively pulls
 # apple_support; we deliberately do NOT register its toolchain, so the default
 # CLT-based cc toolchain is used (verified working on this machine).

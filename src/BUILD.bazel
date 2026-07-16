@@ -1,19 +1,36 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 
-# Local vector-add sample: dispatches on the real GPU, no networking involved.
+# Backend switch: --//src:shim=true (default) hijacks Metal calls and proxies
+# them over gRPC; --//src:shim=false builds the same main.cpp against the real
+# local GPU with no networking. main.cpp is identical in both modes; only the
+# force-include of metal_hijack.h differs.
+bool_flag(
+    name = "shim",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "use_shim",
+    flag_values = {":shim": "true"},
+)
+
 # add.metal is compiled at runtime via newLibrary(source), so it ships as a
 # plain data file, not a build step. Under `bazel run` the cwd is the runfiles
-# root, so main.cpp loads it as "metal/add.metal".
+# root, so main.cpp loads it as "src/add.metal".
 cc_binary(
     name = "adder",
     srcs = ["main.cpp"],
-    copts = [
-        "-include",
-        "metal/metal_shim.h",
-    ],
+    copts = select({
+        ":use_shim": [
+            "-include",
+            "metal/metal_hijack.h",
+        ],
+        "//conditions:default": [],
+    }),
     data = ["add.metal"],
-    deps = [
-        "//metal:metal_shim",
-        "//third_party/metal-cpp",
-    ],
+    deps = ["//third_party/metal-cpp"] + select({
+        ":use_shim": ["//metal:metal_shim"],
+        "//conditions:default": [],
+    }),
 )

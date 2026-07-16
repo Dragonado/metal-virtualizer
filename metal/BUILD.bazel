@@ -20,14 +20,13 @@ cc_binary(
 cc_library(
     name = "metal_shim",
     srcs = ["metal_impl.cpp"],
-    hdrs = ["metal_shim.h"],
+    hdrs = [
+        "metal_hijack.h",
+        "metal_shim.h",
+    ],
     deps = [
         "//proto:tnrc_cc_grpc",
         "//third_party/metal-cpp",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/flags:parse",
-        "@abseil-cpp//absl/log:initialize",
-        "@abseil-cpp//absl/strings:str_format",
         "@grpc//:grpc++",
     ],
 )

@@ -35,6 +35,8 @@ class Device {
   public:
     Device(uint32_t device_id) : device_id_(device_id) {}
 
+    NS::String *name();
+
     // CommandQueue *newCommandQueue() {
     //     std::cout << "[SHIM] Intercepted: newCommandQueue()" << std::endl;
     //     return new CommandQueue(_realDevice->newCommandQueue());
@@ -59,7 +61,3 @@ class Device {
 Device *CreateSystemDefaultDevice();
 
 } // namespace MetalShim
-
-// 3. The Hijack: Replace the MTL namespace with your Shim namespace.
-// Any code in adder.cpp below this point will use MetalShim instead of MTL.
-#define MTL MetalShim

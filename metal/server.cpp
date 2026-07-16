@@ -1,4 +1,5 @@
-#define NS_PRIVATE_IMPLEMENTATION
+// NS_PRIVATE_IMPLEMENTATION lives in //third_party/metal-cpp:impl.cpp;
+// defining it here too would duplicate the Foundation symbols at link.
 #define MTL_PRIVATE_IMPLEMENTATION
 
 #include <Foundation/Foundation.hpp>
@@ -23,6 +24,8 @@ using grpc::Status;
 using grpc::StatusCode;
 using tnrc::CreateSystemDefaultDeviceShimRequest;
 using tnrc::CreateSystemDefaultDeviceShimResponse;
+using tnrc::GetDeviceNameShimRequest;
+using tnrc::GetDeviceNameShimResponse;
 using tnrc::TnrcService;
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
@@ -39,8 +42,18 @@ class ShimmerImpl final : public TnrcService::Service {
         if (device == nullptr) {
             return Status(StatusCode::INTERNAL, "Could not create metal device.");
         }
-        device_map_[++counter_] = device;
+        counter_++;
+        device_map_[counter_] = device;
         response->set_gpu_id(counter_);
+        return Status::OK;
+    }
+
+    Status GetDeviceNameShim(ServerContext *context, const GetDeviceNameShimRequest *request, GetDeviceNameShimResponse *response) override {
+        if (device_map_.find(request->device_id()) == device_map_.end()) {
+            return Status(StatusCode::INTERNAL, "Could not find metal device.");
+        }
+        MTL::Device *device = device_map_[request->device_id()];
+        response->set_name(device->name()->cString(NS::UTF8StringEncoding));
         return Status::OK;
     }
 

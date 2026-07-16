@@ -4,35 +4,32 @@
 #include <grpcpp/grpcpp.h>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "metal_shim.h"
 
-#include "absl/flags/flag.h"
-#include "absl/flags/parse.h"
-#include "absl/log/initialize.h"
-#include "absl/strings/str_format.h"
 #include "proto/tnrc.grpc.pb.h"
 #include "proto/tnrc.pb.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
-using grpc::StatusCode;
 using tnrc::CreateSystemDefaultDeviceShimRequest;
 using tnrc::CreateSystemDefaultDeviceShimResponse;
+using tnrc::GetDeviceNameShimRequest;
+using tnrc::GetDeviceNameShimResponse;
 using tnrc::TnrcService;
-
-ABSL_FLAG(std::string, target, "localhost:50051", "Server address");
 
 namespace MetalShim {
 
+namespace {
 class TnrcServiceClient {
   public:
     TnrcServiceClient(std::shared_ptr<Channel> channel)
         : stub_(TnrcService::NewStub(channel)) {}
 
-    uint32_t GetDeviceId() {
+    std::optional<uint32_t> CreateDeviceId() {
         CreateSystemDefaultDeviceShimRequest request;
         CreateSystemDefaultDeviceShimResponse response;
         ClientContext context;
@@ -42,9 +39,27 @@ class TnrcServiceClient {
         if (status.ok()) {
             return response.gpu_id();
         } else {
-            std::cout << status.error_code() << ": " << status.error_message()
+            std::cerr << "ERROR: " << status.error_code() << ": " << status.error_message()
                       << std::endl;
-            return -1;
+            return std::nullopt;
+        }
+    }
+
+    NS::String *GetDeviceName(uint32_t device_id) {
+        GetDeviceNameShimRequest request;
+        GetDeviceNameShimResponse response;
+        ClientContext context;
+
+        request.set_device_id(device_id);
+
+        Status status = stub_->GetDeviceNameShim(&context, request, &response);
+
+        if (status.ok()) {
+            return NS::String::string(response.name().c_str(), NS::UTF8StringEncoding);
+        } else {
+            std::cerr << "ERROR: " << status.error_code() << ": " << status.error_message()
+                      << std::endl;
+            return nullptr;
         }
     }
 
@@ -52,15 +67,27 @@ class TnrcServiceClient {
     std::unique_ptr<TnrcService::Stub> stub_;
 };
 
+// Constructed exactly once per process when its called for the first time.
+// Subsequence calls returns the same client.
+TnrcServiceClient &Client() {
+    static TnrcServiceClient client(grpc::CreateChannel(
+        "localhost:50051", grpc::InsecureChannelCredentials()));
+    return client;
+}
+} // namespace
+
+NS::String *Device::name() {
+    return Client().GetDeviceName(device_id_);
+}
+
 Device *CreateSystemDefaultDevice() {
-    std::string target_str = absl::GetFlag(FLAGS_target);
+    std::optional<uint32_t> device_id = Client().CreateDeviceId();
 
-    TnrcServiceClient client(
-        grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
+    if (!device_id.has_value())
+        return nullptr;
 
-    uint32_t device_id = client.GetDeviceId();
-    std::cout << "GPU ID: " << device_id << std::endl;
-    return new Device(device_id);
+    std::cerr << "GPU ID: " << device_id.value() << std::endl;
+    return new Device(device_id.value());
 }
 
 } // namespace MetalShim
