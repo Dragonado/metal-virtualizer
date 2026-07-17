@@ -8,7 +8,7 @@
 #include "Foundation/Foundation.hpp"
 #include "Metal/Metal.hpp"
 
-// constexpr size_t MAXN = 100;
+constexpr size_t MAXN = 100;
 // constexpr float EPS = 1e-5;
 
 class Adder {
@@ -69,16 +69,17 @@ class Adder {
         return (new Adder())->initWithDevice(device);
     }
 
-    // void sendComputeCommand() {
-    //     MTL::CommandBuffer *command_buffer = queue_->commandBuffer();
-    //     MTL::ComputeCommandEncoder *encoder = command_buffer->computeCommandEncoder();
+    void sendComputeCommand() {
+        // MTL::CommandBuffer *command_buffer = queue_->commandBuffer();
+        // MTL::ComputeCommandEncoder *encoder = command_buffer->computeCommandEncoder();
 
-    //     encodeAddCommand(encoder);
+        // encodeAddCommand(encoder);
+        encodeAddCommand(NULL);
 
-    //     command_buffer->commit();
+        // command_buffer->commit();
 
-    //     command_buffer->waitUntilCompleted();
-    // }
+        // command_buffer->waitUntilCompleted();
+    }
 
     ~Adder() {
         // buffer_a_->release();
@@ -89,23 +90,23 @@ class Adder {
     }
 
   private:
-    // void encodeAddCommand(MTL::ComputeCommandEncoder *encoder) {
-    //     encoder->setComputePipelineState(add_pso_);
-    //     encoder->setBuffer(buffer_a_, 0, 0);
-    //     encoder->setBuffer(buffer_b_, 0, 1);
-    //     encoder->setBuffer(buffer_c_, 0, 2);
+    void encodeAddCommand(MTL::ComputeCommandEncoder *encoder) {
+        // encoder->setComputePipelineState(add_pso_);
+        // encoder->setBuffer(buffer_a_, 0, 0);
+        // encoder->setBuffer(buffer_b_, 0, 1);
+        // encoder->setBuffer(buffer_c_, 0, 2);
 
-    //     MTL::Size grid_size = MTL::Size(MAXN, 1, 1);
-    //     NS::Integer tg_size = add_pso_->maxTotalThreadsPerThreadgroup();
-    //     if (tg_size > (int)MAXN) {
-    //         tg_size = MAXN;
-    //     }
-    //     MTL::Size thread_group_size = MTL::Size(tg_size, 1, 1);
+        MTL::Size grid_size = MTL::Size(MAXN, 1, 1);
+        NS::Integer tg_size = add_pso_->maxTotalThreadsPerThreadgroup();
+        if (tg_size > (int)MAXN) {
+            tg_size = MAXN;
+        }
+        MTL::Size thread_group_size = MTL::Size(tg_size, 1, 1);
 
-    //     encoder->dispatchThreads(grid_size, thread_group_size);
+        // encoder->dispatchThreads(grid_size, thread_group_size);
 
-    //     encoder->endEncoding();
-    // }
+        // encoder->endEncoding();
+    }
 
     // void prepareData() {
     //     populate_random_float(buffer_a_, MAXN);
@@ -169,7 +170,7 @@ int main() {
     Adder *adder = Adder::create(device);
     assert(adder != nullptr);
     // adder->prepareData();
-    // adder->sendComputeCommand();
+    adder->sendComputeCommand();
 
     // adder->verify();
 

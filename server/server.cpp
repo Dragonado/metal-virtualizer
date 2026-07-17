@@ -116,6 +116,12 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
 
+    Status MaxTotalThreadsPerThreadgroupShim(ServerContext *context, const MaxTotalThreadsPerThreadgroupShimRequest *request, MaxTotalThreadsPerThreadgroupShimResponse *response) override {
+        MTL::ComputePipelineState *compute_pipeline_state = compute_pipeline_state_map_[request->compute_pipeline_state_id()];
+        response->set_max_total_threads_per_threadgroup(std::intptr_t(compute_pipeline_state->maxTotalThreadsPerThreadgroup()));
+        return Status::OK;
+    }
+
     ~ShimmerImpl() {
         for (auto &[id, device] : device_map_) {
             if (device != nullptr)

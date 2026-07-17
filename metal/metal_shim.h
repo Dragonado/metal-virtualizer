@@ -8,6 +8,7 @@
 namespace MetalShim {
 
 using CompileOptions = MTL::CompileOptions;
+using Size = MTL::Size;
 
 class Function {
   public:
@@ -40,14 +41,37 @@ class ComputePipelineState {
 
     void release();
 
+    NS::Integer maxTotalThreadsPerThreadgroup();
+
   private:
     uint32_t compute_pipeline_state_id_;
+};
+
+class ComputeCommandEncoder {
+  public:
+    void setComputePipelineState(ComputePipelineState *compute_pipeline_state);
+    void dispatchThreads(Size grid_size, Size thread_group_size);
+    void endEncoding();
+
+  private:
+};
+
+class CommandBuffer {
+  public:
+    ComputeCommandEncoder *computeCommandEncoder();
+
+    void commit();
+
+    void waitUntilCompleted();
+
+  private:
 };
 
 class CommandQueue {
   public:
     CommandQueue(uint32_t command_queue_id) : command_queue_id_(command_queue_id) {}
 
+    CommandBuffer *commandBuffer();
     void release();
 
   private:

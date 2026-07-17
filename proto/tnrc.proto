@@ -9,6 +9,7 @@ service TnrcService {
   rpc CreateFunctionShim(CreateFunctionShimRequest) returns (CreateFunctionShimResponse);
   rpc ReleaseFunctionShim(ReleaseFunctionShimRequest) returns (ReleaseFunctionShimResponse);
   rpc CreateComputePipelineStateShim(CreateComputePipelineStateShimRequest) returns (CreateComputePipelineStateShimResponse);
+  rpc MaxTotalThreadsPerThreadgroupShim(MaxTotalThreadsPerThreadgroupShimRequest) returns (MaxTotalThreadsPerThreadgroupShimResponse);
 }
 
 message CreateSystemDefaultDeviceShimRequest {}
@@ -67,4 +68,12 @@ message CreateComputePipelineStateShimRequest {
 
 message CreateComputePipelineStateShimResponse {
   uint32 compute_pipeline_state_id = 1;
+}
+
+message MaxTotalThreadsPerThreadgroupShimRequest {
+  uint32 compute_pipeline_state_id = 1;
+}
+
+message MaxTotalThreadsPerThreadgroupShimResponse {
+  sint64 max_total_threads_per_threadgroup = 1;
 }

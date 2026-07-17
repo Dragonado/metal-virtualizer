@@ -159,6 +159,24 @@ class TnrcServiceClient {
         }
     }
 
+    std::optional<NS::Integer> GetMaxTotalThreadsPerThreadgroup(uint32_t compute_pipeline_state_id) {
+        MaxTotalThreadsPerThreadgroupShimRequest request;
+        MaxTotalThreadsPerThreadgroupShimResponse response;
+        ClientContext context;
+
+        request.set_compute_pipeline_state_id(compute_pipeline_state_id);
+
+        Status status = stub_->MaxTotalThreadsPerThreadgroupShim(&context, request, &response);
+
+        if (status.ok()) {
+            return NS::Integer(response.max_total_threads_per_threadgroup());
+        } else {
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                      << std::endl;
+            return std::nullopt;
+        }
+    }
+
   private:
     std::unique_ptr<TnrcService::Stub> stub_;
 };
@@ -242,8 +260,15 @@ ComputePipelineState *Device::newComputePipelineState(const Function *func, NS::
     return new ComputePipelineState(compute_pipeline_state_id.value());
 }
 
-// TODO: Make rpc call.
+NS::Integer ComputePipelineState::maxTotalThreadsPerThreadgroup() {
+    std::optional<NS::Integer> max_total_threads_per_threadgroup = Client().GetMaxTotalThreadsPerThreadgroup(compute_pipeline_state_id_);
+    assert(max_total_threads_per_threadgroup.has_value());
 
+    std::cerr << "[SHIM] maxTotalThreadsPerThreadgroup: " << max_total_threads_per_threadgroup.value() << std::endl;
+    return max_total_threads_per_threadgroup.value();
+}
+
+// TODO: Make rpc call.
 void ComputePipelineState::release() {}
 
 } // namespace MetalShim
