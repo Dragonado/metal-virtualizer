@@ -70,15 +70,15 @@ class Adder {
     }
 
     void sendComputeCommand() {
-        // MTL::CommandBuffer *command_buffer = queue_->commandBuffer();
+        MTL::CommandBuffer *command_buffer = queue_->commandBuffer();
         // MTL::ComputeCommandEncoder *encoder = command_buffer->computeCommandEncoder();
 
         // encodeAddCommand(encoder);
         encodeAddCommand(NULL);
 
-        // command_buffer->commit();
+        command_buffer->commit();
 
-        // command_buffer->waitUntilCompleted();
+        command_buffer->waitUntilCompleted();
     }
 
     ~Adder() {
@@ -170,7 +170,7 @@ int main() {
     Adder *adder = Adder::create(device);
     assert(adder != nullptr);
     // adder->prepareData();
-    adder->sendComputeCommand();
+    // adder->sendComputeCommand();
 
     // adder->verify();
 

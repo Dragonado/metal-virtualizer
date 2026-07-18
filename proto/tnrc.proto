@@ -3,27 +3,18 @@ package tnrc;
 
 service TnrcService {
   rpc CreateSystemDefaultDeviceShim(CreateSystemDefaultDeviceShimRequest) returns (CreateSystemDefaultDeviceShimResponse);
-  rpc GetDeviceNameShim(GetDeviceNameShimRequest) returns (GetDeviceNameShimResponse);
   rpc CreateCommandQueueShim(CreateCommandQueueShimRequest) returns (CreateCommandQueueShimResponse);
   rpc CreateLibraryShim(CreateLibraryShimRequest) returns (CreateLibraryShimResponse);
   rpc CreateFunctionShim(CreateFunctionShimRequest) returns (CreateFunctionShimResponse);
   rpc ReleaseFunctionShim(ReleaseFunctionShimRequest) returns (ReleaseFunctionShimResponse);
   rpc CreateComputePipelineStateShim(CreateComputePipelineStateShimRequest) returns (CreateComputePipelineStateShimResponse);
-  rpc MaxTotalThreadsPerThreadgroupShim(MaxTotalThreadsPerThreadgroupShimRequest) returns (MaxTotalThreadsPerThreadgroupShimResponse);
 }
 
 message CreateSystemDefaultDeviceShimRequest {}
 
 message CreateSystemDefaultDeviceShimResponse {
   uint32 device_id = 1;
-}
-
-message GetDeviceNameShimRequest {
-  uint32 device_id = 1;
-}
-
-message GetDeviceNameShimResponse {
-  string name = 1;
+  string device_name = 2;
 }
 
 message CreateCommandQueueShimRequest {
@@ -68,12 +59,9 @@ message CreateComputePipelineStateShimRequest {
 
 message CreateComputePipelineStateShimResponse {
   uint32 compute_pipeline_state_id = 1;
+  sint64 max_total_threads_per_threadgroup = 2;
 }
 
 message MaxTotalThreadsPerThreadgroupShimRequest {
   uint32 compute_pipeline_state_id = 1;
-}
-
-message MaxTotalThreadsPerThreadgroupShimResponse {
-  sint64 max_total_threads_per_threadgroup = 1;
 }

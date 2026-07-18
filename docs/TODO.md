@@ -82,6 +82,17 @@ policy is deferred.
 - [ ] FIFO submission of committed command buffers across tenants (this IS the gap-fill mechanism, not a separate component)
 - [ ] DEFERRED (stretch): fair-share / priority policy. Sub-kernel preemption is not exposed by the Metal API, do not attempt.
 
+### VM test setup (optional)
+
+- [ ] Run the GPU server on the host, bound to `0.0.0.0:50051`.
+- [ ] Give each VM a network interface with a route to the host.
+- [ ] Configure each client to connect to the host's VM-reachable IP address and
+      port, not `localhost`. Each VM has its own loopback interface, so
+      `localhost:50051` inside a guest refers to that guest, not the host.
+- [ ] CAVEAT: verify the guest is genuinely GPU-less or that all Metal device
+      acquisition is forced through the shim. A VM that exposes a local virtual
+      GPU/Metal path can bypass the remoting layer and invalidate the test.
+
 ## M6 — The proof (measurement)
 
 Metric is pinned to the concurrent-admission model: INSTANTANEOUS GPU

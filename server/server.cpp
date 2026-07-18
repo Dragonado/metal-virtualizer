@@ -44,15 +44,7 @@ class ShimmerImpl final : public TnrcService::Service {
         counter_++;
         device_map_[counter_] = device;
         response->set_device_id(counter_);
-        return Status::OK;
-    }
-
-    Status GetDeviceNameShim(ServerContext *context, const GetDeviceNameShimRequest *request, GetDeviceNameShimResponse *response) override {
-        if (device_map_.find(request->device_id()) == device_map_.end()) {
-            return Status(StatusCode::INTERNAL, "Could not find metal device.");
-        }
-        MTL::Device *device = device_map_[request->device_id()];
-        response->set_name(device->name()->cString(NS::UTF8StringEncoding));
+        response->set_device_name(device->name()->cString(NS::UTF8StringEncoding));
         return Status::OK;
     }
 
@@ -113,16 +105,29 @@ class ShimmerImpl final : public TnrcService::Service {
         counter_++;
         compute_pipeline_state_map_[counter_] = compute_pipeline_state;
         response->set_compute_pipeline_state_id(counter_);
-        return Status::OK;
-    }
+        response->set_max_total_threads_per_threadgroup(compute_pipeline_state->maxTotalThreadsPerThreadgroup());
 
-    Status MaxTotalThreadsPerThreadgroupShim(ServerContext *context, const MaxTotalThreadsPerThreadgroupShimRequest *request, MaxTotalThreadsPerThreadgroupShimResponse *response) override {
-        MTL::ComputePipelineState *compute_pipeline_state = compute_pipeline_state_map_[request->compute_pipeline_state_id()];
-        response->set_max_total_threads_per_threadgroup(std::intptr_t(compute_pipeline_state->maxTotalThreadsPerThreadgroup()));
         return Status::OK;
     }
 
     ~ShimmerImpl() {
+        // Order is important.
+        for (auto &[id, compute_pipeline_state] : compute_pipeline_state_map_) {
+            if (compute_pipeline_state != nullptr)
+                compute_pipeline_state->release();
+        }
+        for (auto &[id, function] : function_map_) {
+            if (function != nullptr)
+                function->release();
+        }
+        for (auto &[id, library] : library_map_) {
+            if (library != nullptr)
+                library->release();
+        }
+        for (auto &[id, command_queue] : command_queue_map_) {
+            if (command_queue != nullptr)
+                command_queue->release();
+        }
         for (auto &[id, device] : device_map_) {
             if (device != nullptr)
                 device->release();
@@ -131,11 +136,11 @@ class ShimmerImpl final : public TnrcService::Service {
 
   private:
     uint32_t counter_;
-    std::map<uint32_t, MTL::Device *> device_map_;
-    std::map<uint32_t, MTL::CommandQueue *> command_queue_map_;
-    std::map<uint32_t, MTL::Library *> library_map_;
-    std::map<uint32_t, MTL::Function *> function_map_;
     std::map<uint32_t, MTL::ComputePipelineState *> compute_pipeline_state_map_;
+    std::map<uint32_t, MTL::Function *> function_map_;
+    std::map<uint32_t, MTL::Library *> library_map_;
+    std::map<uint32_t, MTL::CommandQueue *> command_queue_map_;
+    std::map<uint32_t, MTL::Device *> device_map_;
 };
 
 void RunServer(uint16_t port) {

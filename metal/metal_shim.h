@@ -37,14 +37,19 @@ class Library {
 
 class ComputePipelineState {
   public:
-    ComputePipelineState(uint32_t compute_pipeline_state_id) : compute_pipeline_state_id_(compute_pipeline_state_id) {}
+    ComputePipelineState(uint32_t compute_pipeline_state_id, NS::Integer max_total_threads_per_threadgroup) : compute_pipeline_state_id_(compute_pipeline_state_id), max_total_threads_per_threadgroup_(max_total_threads_per_threadgroup) {}
 
     void release();
 
     NS::Integer maxTotalThreadsPerThreadgroup();
 
+    uint32_t compute_pipeline_state_id() {
+        return compute_pipeline_state_id_;
+    }
+
   private:
     uint32_t compute_pipeline_state_id_;
+    NS::Integer max_total_threads_per_threadgroup_;
 };
 
 class ComputeCommandEncoder {
@@ -58,6 +63,8 @@ class ComputeCommandEncoder {
 
 class CommandBuffer {
   public:
+    CommandBuffer(uint32_t command_queue_id) : command_queue_id_(command_queue_id) {}
+
     ComputeCommandEncoder *computeCommandEncoder();
 
     void commit();
@@ -65,6 +72,7 @@ class CommandBuffer {
     void waitUntilCompleted();
 
   private:
+    uint32_t command_queue_id_;
 };
 
 class CommandQueue {
@@ -79,11 +87,9 @@ class CommandQueue {
 };
 
 class Device {
-  private:
-    uint32_t device_id_;
 
   public:
-    Device(uint32_t device_id) : device_id_(device_id) {}
+    Device(uint32_t device_id, NS::String *device_name) : device_id_(device_id), device_name_(device_name) {}
 
     NS::String *name();
 
@@ -96,6 +102,14 @@ class Device {
     // MTL::ComputePipelineState *newComputePipelineState(const MTL::Function *computeFunction, NS::Error **error) {
     //     return _realDevice->newComputePipelineState(computeFunction, error);
     // }
+
+    uint32_t device_id() {
+        return device_id_;
+    }
+
+  private:
+    uint32_t device_id_;
+    NS::String *device_name_;
 };
 
 Device *CreateSystemDefaultDevice();

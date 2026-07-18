@@ -26,7 +26,7 @@ class TnrcServiceClient {
     TnrcServiceClient(std::shared_ptr<Channel> channel)
         : stub_(TnrcService::NewStub(channel)) {}
 
-    std::optional<uint32_t> CreateDeviceId() {
+    Device *CreateDevice() {
         CreateSystemDefaultDeviceShimRequest request;
         CreateSystemDefaultDeviceShimResponse response;
         ClientContext context;
@@ -34,29 +34,11 @@ class TnrcServiceClient {
         Status status = stub_->CreateSystemDefaultDeviceShim(&context, request, &response);
 
         if (status.ok()) {
-            return response.device_id();
+            return (new Device(response.device_id(), NS::String::string(response.device_name().c_str(), NS::UTF8StringEncoding)));
         } else {
             std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
                       << std::endl;
-            return std::nullopt;
-        }
-    }
-
-    NS::String *GetDeviceName(uint32_t device_id) {
-        GetDeviceNameShimRequest request;
-        GetDeviceNameShimResponse response;
-        ClientContext context;
-
-        request.set_device_id(device_id);
-
-        Status status = stub_->GetDeviceNameShim(&context, request, &response);
-
-        if (status.ok()) {
-            return NS::String::string(response.name().c_str(), NS::UTF8StringEncoding);
-        } else {
-            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
-                      << std::endl;
-            return nullptr;
+            return NULL;
         }
     }
 
@@ -138,7 +120,7 @@ class TnrcServiceClient {
         return false;
     }
 
-    std::optional<uint32_t> CreateComputePipelineState(uint32_t device_id, const Function *func, NS::Error **error) {
+    ComputePipelineState *CreateComputePipelineState(uint32_t device_id, const Function *func, NS::Error **error) {
         CreateComputePipelineStateShimRequest request;
         CreateComputePipelineStateShimResponse response;
         ClientContext context;
@@ -151,30 +133,17 @@ class TnrcServiceClient {
         Status status = stub_->CreateComputePipelineStateShim(&context, request, &response);
 
         if (status.ok()) {
-            return response.compute_pipeline_state_id();
+            return (new ComputePipelineState(response.compute_pipeline_state_id(), response.max_total_threads_per_threadgroup()));
         } else {
             std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
                       << std::endl;
-            return std::nullopt;
+            return NULL;
         }
     }
 
-    std::optional<NS::Integer> GetMaxTotalThreadsPerThreadgroup(uint32_t compute_pipeline_state_id) {
-        MaxTotalThreadsPerThreadgroupShimRequest request;
-        MaxTotalThreadsPerThreadgroupShimResponse response;
-        ClientContext context;
-
-        request.set_compute_pipeline_state_id(compute_pipeline_state_id);
-
-        Status status = stub_->MaxTotalThreadsPerThreadgroupShim(&context, request, &response);
-
-        if (status.ok()) {
-            return NS::Integer(response.max_total_threads_per_threadgroup());
-        } else {
-            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
-                      << std::endl;
-            return std::nullopt;
-        }
+    bool CommitCommandBuffer(CommandBuffer *command_buffer) {
+        // TODO: make rpc call.
+        return true;
     }
 
   private:
@@ -191,17 +160,17 @@ TnrcServiceClient &Client() {
 } // namespace
 
 NS::String *Device::name() {
-    return Client().GetDeviceName(device_id_);
+    return this->device_name_;
 }
 
 Device *CreateSystemDefaultDevice() {
-    std::optional<uint32_t> device_id = Client().CreateDeviceId();
+    Device *device = Client().CreateDevice();
 
-    if (!device_id.has_value())
-        return nullptr;
-
-    std::cerr << "[SHIM] Device ID: " << device_id.value() << std::endl;
-    return new Device(device_id.value());
+    if (device != NULL) {
+        std::cerr << "[SHIM] Device ID: " << device->device_id() << std::endl;
+        return device;
+    }
+    return NULL;
 }
 
 CommandQueue *Device::newCommandQueue() {
@@ -212,6 +181,14 @@ CommandQueue *Device::newCommandQueue() {
 
     std::cerr << "[SHIM] CommandQueue ID: " << command_queue_id.value() << std::endl;
     return new CommandQueue(command_queue_id.value());
+}
+
+CommandBuffer *CommandQueue::commandBuffer() {
+    return (new CommandBuffer(command_queue_id_));
+}
+
+void CommandBuffer::commit() {
+    assert(Client().CommitCommandBuffer(this));
 }
 
 // TODO: Make rpc call.
@@ -250,22 +227,17 @@ void Function::release() {
 }
 
 ComputePipelineState *Device::newComputePipelineState(const Function *func, NS::Error **error) {
-    std::optional<uint32_t> compute_pipeline_state_id = Client().CreateComputePipelineState(device_id_, func, error);
+    ComputePipelineState *compute_pipeline_state = Client().CreateComputePipelineState(device_id_, func, error);
 
-    if (!compute_pipeline_state_id.has_value()) {
-        return nullptr;
+    if (compute_pipeline_state != NULL) {
+        std::cerr << "[SHIM] ComputePipelineState ID: " << compute_pipeline_state->compute_pipeline_state_id() << std::endl;
+        return compute_pipeline_state;
     }
-
-    std::cerr << "[SHIM] ComputePipelineState ID: " << compute_pipeline_state_id.value() << std::endl;
-    return new ComputePipelineState(compute_pipeline_state_id.value());
+    return nullptr;
 }
 
 NS::Integer ComputePipelineState::maxTotalThreadsPerThreadgroup() {
-    std::optional<NS::Integer> max_total_threads_per_threadgroup = Client().GetMaxTotalThreadsPerThreadgroup(compute_pipeline_state_id_);
-    assert(max_total_threads_per_threadgroup.has_value());
-
-    std::cerr << "[SHIM] maxTotalThreadsPerThreadgroup: " << max_total_threads_per_threadgroup.value() << std::endl;
-    return max_total_threads_per_threadgroup.value();
+    return this->max_total_threads_per_threadgroup_;
 }
 
 // TODO: Make rpc call.

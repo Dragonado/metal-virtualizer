@@ -2,6 +2,38 @@
 
 Running notes and insights worth writing up later.
 
+## Proto skew fails on a spectrum, and the quiet end is the dangerous one
+
+The `.proto` is a compile-time artifact only. `protoc` bakes the generated
+code into each binary; after that the wire never carries, exchanges, or
+verifies a schema. There is no version handshake where client and server
+compare protos. Each process runs whatever contract was frozen in at its own
+build time. So if the server is up and you rebuild only the client with a
+changed proto, the two disagree, and gRPC's reaction depends entirely on *how*
+they disagree:
+
+- New RPC (client calls a method the old server never registered): clean
+  `UNIMPLEMENTED` (status 12). Loud, you notice immediately.
+- Added fields on an existing message: no error at all. Unknown fields are
+  ignored by the old side; absent fields read as proto3 defaults (0, "").
+  This silence is deliberate: it is exactly what lets old and new binaries
+  coexist during a rolling deploy.
+- Renumbered or retyped fields: silently wrong data. Field *names* never
+  travel the wire, only numbers. Renumber and the old side decodes your bytes
+  under its old numbering, so values land in the wrong fields and the rest
+  read as zero. No error, no warning. A `device_id` of 0 arriving at a server
+  whose handle map starts at 1.
+
+The uncomfortable point is that the property enabling zero-downtime upgrades
+(tolerate the other side being a different version) is the same property that
+makes local dev skew invisible. The forward/backward compatibility is not a
+safety net catching your mistake, it is the thing hiding it.
+
+Two rules fall out: restart the server after every proto change during dev,
+and never reuse or renumber a field id once it has shipped in any running
+binary. Field numbers are a permanent namespace; treat a retired number like a
+dropped database column, not like a renamed local variable.
+
 ## Unified memory is the zero-copy freedom the network destroys
 
 `buffer->contents()` returns a CPU pointer into the buffer. In the vector-add
@@ -75,6 +107,99 @@ The record and execute groups (encoder calls, commit) stream across per
 invocation: that is the command plane. Metal already did the hard architectural
 work of finding where the cheap/expensive boundary sits. The virtualization
 layer should put its network on the same line.
+
+## Which call goes in which plane, and the one test that decides
+
+The split (control vs command) only helps once you can put each concrete method
+on one side. The tempting test is "does the client look at the result?" but
+that is wrong: it describes what one particular client program happens to do,
+not the method itself. Bet your class layout on it and a different client that
+inspects something you filed under command-plane forces you to rebuild, not add
+a method.
+
+The real test is about the return value itself: **can the client make up the
+answer on its own, or does only the server know it?**
+
+- If only the server knows it, the client has to stop and wait for the real
+  answer before it can go on. That is a round trip. Control plane. Examples: did
+  the shader compile or fail? what is the device name? did the allocation
+  succeed?
+- If the return value is just a ticket that the client only ever hands back to
+  the server later, the client can make up the ticket itself (pick a number,
+  agree the server will bind it to the real object at replay) and keep going.
+  Record the call, send it later. Command plane.
+
+The "does the client look at it" thing is just a side effect of this. The client
+checks the pipeline state for null because only the server knows whether the
+compile worked. It never checks the command buffer because there is nothing to
+know: it is just a ticket.
+
+Control plane (each waits for a real answer only the server can give):
+
+- `MTLCreateSystemDefaultDevice` -> the whole session hangs off this; client
+  checks it is non-null.
+- `device->newCommandQueue()` -> a lasting object made once and reused every
+  dispatch. It has to exist on the server before any commit can name it as where
+  to submit.
+- `device->newLibrary(source, ...)` -> the client needs to know if the shader
+  compiled. Also where the MSL source crosses to the Mac to be compiled.
+- `library->newFunction(name)` -> can fail if the name is not found; client
+  needs to know.
+- `device->newComputePipelineState(func, &err)` -> can fail; also where the
+  final GPU-specific compile actually runs on the server.
+- `device->newBuffer(length, options)` -> allocation the server has to really
+  do, and the client is about to write inputs into it through `contents()`.
+- `device->name()` and other queries -> the value only the server has.
+
+Command plane (recorded locally, nothing sent until commit):
+
+- `queue->commandBuffer()` -> starts an empty recording. Nothing on the server
+  yet; the proxy just remembers which queue to submit to later.
+- `commandBuffer->computeCommandEncoder()` -> a recorder that writes into the
+  command buffer's list. Local only.
+- `encoder->setComputePipelineState(pso)` -> writes down a step naming the
+  pipeline state (already made in the control plane).
+- `encoder->setBuffer(buf, offset, index)` -> writes down a step naming a buffer
+  plus a couple numbers.
+- `encoder->dispatchThreads(grid, threadgroup)` -> writes down a step of
+  numbers.
+- `encoder->endEncoding()` -> writes down an end marker.
+
+The two at the boundary:
+
+- `commit()` is the one command-plane call that actually goes on the wire. It is
+  the flush: it sends the queue id and the whole recorded list (plus the input
+  buffers the client wrote into, which is the coherence part) in a single round
+  trip, and the server replays the steps against the real objects.
+- `waitUntilCompleted()` is where the client waits for the GPU to finish. It
+  might be free (if commit already waited) or a second wait on the wire, but
+  either way it is not a per-step round trip.
+
+One method looks like it should go on the wire and does not:
+`pso->maxTotalThreadsPerThreadgroup()`. Only the server knows the value, so by
+the test it should be a round trip. But it is a fixed property of the pipeline
+state you just created, so you send it back on that creation response and it
+costs nothing extra. Worth looking for this in general: a read that is really a
+constant fact about an object you just made never needs its own trip.
+
+The count for one dispatch: about six round trips for all the setup, then one
+commit per dispatch carrying the whole recorded batch, plus at most one wait.
+The naive "every method is a round trip" version pays nine or more per dispatch.
+That gap is the whole reason the command plane records instead of calling.
+
+A caveat on all of this, and it is the honest one. Even "can the client make up
+the answer" is read off this one workload. The fully general version does not
+label methods at all: it defers everything, hands back a made-up ticket for
+every call, and only stops to wait when the client asks for something only the
+server knows. Then no new client can ever break the layout, because the rule is
+just "wait when someone needs a real answer." That is promise pipelining, the
+same idea behind async/await. The MVP is allowed to hard-label each method only
+because the same person writes every client, so the set of calls is known and
+fixed. If that stopped being true, the labels would have to become a runtime
+decision. And the messy case that shows the seam: `newBuffer` returns a ticket
+(could be made up) but can also fail (only the server knows). When a call is
+both, the failure wins and it round-trips, unless you gamble that it will not
+fail and handle errors late.
 
 ## N handles, one GPU: the gap where virtualization lives
 
@@ -386,3 +511,44 @@ no Apple anything. All the Mac-ness is confined to the one server process. Run
 moved to the server binary. That relocation, not elimination, is the actual
 trick: confine every scrap of Apple to one process on one Mac, and hand everyone
 else a plain-C++ view of it over the wire.
+
+## The wire follows Metal's execution boundary
+
+The easy mistake in a remote API is to make every method call an RPC. That is
+not what Metal is doing. A command encoder is a local notebook: calls such as
+`setBuffer`, `setComputePipelineState`, and `dispatchThreads` only describe
+future work. They do not touch the GPU. The shim should keep the same shape,
+recording those calls locally as a serializable command list and sending that
+list once at `commit()`. The committed command buffer is then both the network
+submission unit and the scheduler's unit of work.
+
+The opposite category is create and query. `newLibrary`, `newFunction`, and
+`newComputePipelineState` need real server-side objects now, so they are
+synchronous RPCs returning opaque IDs. A query follows the same rule only when
+the answer is not already known locally. Immutable properties are better packed
+into their creation response: device creation returns both `device_id` and the
+device name; pipeline creation returns both its ID and its thread limit. The
+client proxy stores those values and its query methods become local reads.
+
+Pointers do not cross the wire. A proxy-object pointer becomes a server handle
+ID. An `NS::String*` becomes its UTF-8 bytes. A buffer pointer becomes a byte
+snapshot at `commit()`, because the application can write through `contents()`
+without making another interceptable API call. An `NS::Error**` becomes a status
+and error payload that the shim turns back into a local error object if needed.
+The general question is not "how do I send this pointer?" but "what does this
+pointer mean?"
+
+## Keeping Foundation is a valid intermediate step
+
+`NS::String` is not a C++ string container. metal-cpp's `NS::String*` is a
+typed pointer to a Foundation-owned Objective-C `NSString` object. The wrapper
+headers know how to issue Objective-C messages, while the actual `NSString`
+implementation lives in Apple's precompiled `Foundation.framework`.
+
+That makes a useful staging choice. A macOS client can receive the device-name
+bytes over gRPC, construct a new local `NSString`, retain it in the proxy, and
+return that cached `NS::String*` from `Device::name()`. It preserves the Metal
+source interface without adding a network round trip. It does not make the
+client portable: Foundation and the Objective-C runtime are Apple platform
+dependencies. Replacing `NS::String` with a small `std::string`-backed shim is
+a later portability step, not a prerequisite for proving Metal remoting.
