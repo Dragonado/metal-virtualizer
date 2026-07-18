@@ -170,7 +170,7 @@ int main() {
     Adder *adder = Adder::create(device);
     assert(adder != nullptr);
     // adder->prepareData();
-    // adder->sendComputeCommand();
+    adder->sendComputeCommand();
 
     // adder->verify();
 

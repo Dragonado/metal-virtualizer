@@ -23,6 +23,8 @@ protobuf codegen. Stand up the plumbing before any Metal crosses the wire.
 - [x] DECIDE the proxy strategy: header shim (DECIDED). ObjC-runtime interposition is a stretch goal only.
 - [ ] Handle table on both sides: proxy handle <-> server object
 - [ ] Server creates the ONE real device once, shared across all sessions
+- [ ] Reject unknown or released remote handles with `NOT_FOUND`; never use
+      `map[id]` for an untrusted RPC ID because it inserts a null entry.
 - [ ] Prove it end to end: (query) `device->name()`, `device->supportsFamily()` forward over the wire and print correctly
 
 ## M2 — Object (create) seams
@@ -35,6 +37,9 @@ round-trip the `NS::Error`.
 - [ ] (create) `newFunction(name)`
 - [ ] (create) `newComputePipelineState(func, &err)` — piggyback `maxTotalThreadsPerThreadgroup` on the response so it never needs its own round-trip
 - [ ] (create) `newBuffer(length, options)` — allocate server buffer AND client shadow; ship length+options only, not contents
+- [ ] Convert server-side creation failures into a local `NS::Error` when the
+      caller supplies `NS::Error**`; never leave the caller's error pointer
+      uninitialized.
 
 ## M3 — Command seams + first single-tenant round trip
 
@@ -80,6 +85,8 @@ policy is deferred.
 - [ ] Session isolation: separate handle tables, separate command streams, per-session copy-at-commit
 - [ ] Do NOT hold a global lock that serializes tenants across GPU submit (that would silently make it serial)
 - [ ] FIFO submission of committed command buffers across tenants (this IS the gap-fill mechanism, not a separate component)
+- [ ] Synchronize shared server handle tables and ID allocation before allowing
+      concurrent RPC handlers to mutate them.
 - [ ] DEFERRED (stretch): fair-share / priority policy. Sub-kernel preemption is not exposed by the Metal API, do not attempt.
 
 ### VM test setup (optional)

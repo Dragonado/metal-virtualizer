@@ -187,10 +187,14 @@ CommandBuffer *CommandQueue::commandBuffer() {
     return (new CommandBuffer(command_queue_id_));
 }
 
+// TODO: Make RPC call.
 void CommandBuffer::commit() {
     assert(Client().CommitCommandBuffer(this));
 }
 
+// TODO: Block until we get response from RPC.
+void CommandBuffer::waitUntilCompleted() {
+}
 // TODO: Make rpc call.
 void CommandQueue::release() {
 }

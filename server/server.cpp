@@ -49,7 +49,13 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateCommandQueueShim(ServerContext *context, const CreateCommandQueueShimRequest *request, CreateCommandQueueShimResponse *response) override {
-        MTL::CommandQueue *command_queue = device_map_[request->device_id()]->newCommandQueue();
+        auto device_itr = device_map_.find(request->device_id());
+        if (device_itr == device_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find device.");
+        }
+
+        MTL::CommandQueue *command_queue = device_itr->second->newCommandQueue();
+
         if (command_queue == nullptr) {
             return Status(StatusCode::INTERNAL, "Could not create command queue.");
         }
@@ -60,8 +66,14 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateLibraryShim(ServerContext *context, const CreateLibraryShimRequest *request, CreateLibraryShimResponse *response) override {
+        auto device_itr = device_map_.find(request->device_id());
+        if (device_itr == device_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find device.");
+        }
+
         NS::Error *err;
-        MTL::Library *library = device_map_[request->device_id()]->newLibrary(
+
+        MTL::Library *library = device_itr->second->newLibrary(
             NS::String::string(request->source().c_str(), NS::UTF8StringEncoding), nullptr, &err);
         if (library == nullptr) {
             return Status(StatusCode::INTERNAL, "Could not create library");
@@ -73,7 +85,12 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateFunctionShim(ServerContext *context, const CreateFunctionShimRequest *request, CreateFunctionShimResponse *response) override {
-        MTL::Function *function = library_map_[request->library_id()]->newFunction(
+        auto library_itr = library_map_.find(request->library_id());
+        if (library_itr == library_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find library.");
+        }
+
+        MTL::Function *function = library_itr->second->newFunction(
             NS::String::string(request->function_name().c_str(), NS::UTF8StringEncoding));
         if (function == nullptr) {
             return Status(StatusCode::INTERNAL, "Could not create function");
@@ -85,20 +102,25 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseFunctionShim(ServerContext *context, const ReleaseFunctionShimRequest *request, ReleaseFunctionShimResponse *response) override {
-        auto function = function_map_.find(request->function_id());
-        if (function == function_map_.end()) {
+        auto function_itr = function_map_.find(request->function_id());
+        if (function_itr == function_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find function.");
         }
 
-        function->second->release();
-        function_map_.erase(function);
+        function_itr->second->release();
+        function_map_.erase(function_itr);
         return Status::OK;
     }
 
     Status CreateComputePipelineStateShim(ServerContext *context, const CreateComputePipelineStateShimRequest *request, CreateComputePipelineStateShimResponse *response) override {
+        auto function_itr = function_map_.find(request->function_id());
+        if (function_itr == function_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find function.");
+        }
+
         NS::Error *err;
         MTL::ComputePipelineState *compute_pipeline_state = device_map_[request->device_id()]->newComputePipelineState(
-            function_map_[request->function_id()], &err);
+            function_itr->second, &err);
         if (compute_pipeline_state == nullptr) {
             return Status(StatusCode::INTERNAL, "Could not create compute_pipeline_state");
         }
