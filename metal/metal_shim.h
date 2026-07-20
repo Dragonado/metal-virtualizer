@@ -8,6 +8,7 @@
 namespace MetalShim {
 
 using CompileOptions = MTL::CompileOptions;
+using ResourceOptions = MTL::ResourceOptions;
 using Size = MTL::Size;
 
 class Function {
@@ -86,6 +87,29 @@ class CommandQueue {
     uint32_t command_queue_id_;
 };
 
+class Buffer {
+  public:
+    Buffer(uint32_t buffer_id, NS::UInteger length, ResourceOptions options) {
+        buffer_id_ = buffer_id;
+        length_ = length;
+        buf_ = malloc(length);
+        assert(buf_ != NULL);
+        memset(buf_, 0, length);
+    }
+    void *contents();
+
+    void release();
+
+    uint32_t buffer_id() {
+        return buffer_id_;
+    }
+
+  private:
+    void *buf_;
+    uint32_t length_;
+    uint32_t buffer_id_;
+};
+
 class Device {
 
   public:
@@ -99,10 +123,7 @@ class Device {
     Library *newLibrary(const NS::String *source, const CompileOptions *options, NS::Error **error);
     ComputePipelineState *newComputePipelineState(const Function *func, NS::Error **error);
 
-    // MTL::ComputePipelineState *newComputePipelineState(const MTL::Function *computeFunction, NS::Error **error) {
-    //     return _realDevice->newComputePipelineState(computeFunction, error);
-    // }
-
+    Buffer *newBuffer(NS::UInteger length, MTL::ResourceOptions options);
     uint32_t device_id() {
         return device_id_;
     }

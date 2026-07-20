@@ -113,13 +113,18 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateComputePipelineStateShim(ServerContext *context, const CreateComputePipelineStateShimRequest *request, CreateComputePipelineStateShimResponse *response) override {
+        auto device_itr = device_map_.find(request->device_id());
+        if (device_itr == device_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find device.");
+        }
+
         auto function_itr = function_map_.find(request->function_id());
         if (function_itr == function_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find function.");
         }
 
         NS::Error *err;
-        MTL::ComputePipelineState *compute_pipeline_state = device_map_[request->device_id()]->newComputePipelineState(
+        MTL::ComputePipelineState *compute_pipeline_state = device_itr->second->newComputePipelineState(
             function_itr->second, &err);
         if (compute_pipeline_state == nullptr) {
             return Status(StatusCode::INTERNAL, "Could not create compute_pipeline_state");
@@ -132,6 +137,21 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
 
+    Status CreateBufferShim(ServerContext *context, const CreateBufferShimRequest *request, CreateBufferShimResponse *response) override {
+        auto device_itr = device_map_.find(request->device_id());
+        if (device_itr == device_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find device.");
+        }
+
+        MTL::Buffer *buffer = device_itr->second->newBuffer(request->length(), request->options());
+        if (buffer == nullptr) {
+            return Status(StatusCode::INTERNAL, "Could not create buffer");
+        }
+        counter_++;
+        buffer_map_[counter_] = buffer;
+        response->set_buffer_id(counter_);
+        return Status::OK;
+    }
     ~ShimmerImpl() {
         // Order is important.
         for (auto &[id, compute_pipeline_state] : compute_pipeline_state_map_) {
@@ -154,6 +174,10 @@ class ShimmerImpl final : public TnrcService::Service {
             if (device != nullptr)
                 device->release();
         }
+        for (auto &[id, buffer] : buffer_map_) {
+            if (buffer != nullptr)
+                buffer->release();
+        }
     }
 
   private:
@@ -162,6 +186,7 @@ class ShimmerImpl final : public TnrcService::Service {
     std::map<uint32_t, MTL::Function *> function_map_;
     std::map<uint32_t, MTL::Library *> library_map_;
     std::map<uint32_t, MTL::CommandQueue *> command_queue_map_;
+    std::map<uint32_t, MTL::Buffer *> buffer_map_;
     std::map<uint32_t, MTL::Device *> device_map_;
 };
 

@@ -9,15 +9,15 @@
 #include "Metal/Metal.hpp"
 
 constexpr size_t MAXN = 100;
-// constexpr float EPS = 1e-5;
+constexpr float EPS = 1e-5;
 
 class Adder {
   public:
     Adder *initWithDevice(MTL::Device *device) {
         device_ = device;
-        // buffer_a_ = device_->newBuffer(MAXN * sizeof(float), 0);
-        // buffer_b_ = device_->newBuffer(MAXN * sizeof(float), 0);
-        // buffer_c_ = device_->newBuffer(MAXN * sizeof(float), 0);
+        buffer_a_ = device_->newBuffer(MAXN * sizeof(float), 0);
+        buffer_b_ = device_->newBuffer(MAXN * sizeof(float), 0);
+        buffer_c_ = device_->newBuffer(MAXN * sizeof(float), 0);
 
         queue_ = device_->newCommandQueue();
 
@@ -82,11 +82,44 @@ class Adder {
     }
 
     ~Adder() {
-        // buffer_a_->release();
-        // buffer_b_->release();
-        // buffer_c_->release();
+        buffer_a_->release();
+        buffer_b_->release();
+        buffer_c_->release();
         add_pso_->release();
         queue_->release();
+    }
+
+    void prepareData() {
+        populate_random_float(buffer_a_, MAXN);
+        populate_random_float(buffer_b_, MAXN);
+    }
+
+    void verify() {
+        float *a = (float *)buffer_a_->contents();
+        float *b = (float *)buffer_b_->contents();
+        float *c = (float *)buffer_c_->contents();
+
+        std::cout << "First 10 elements of each: " << std::endl;
+        for (size_t i = 0; i < 10; i++) {
+            std::cout << a[i] << " ";
+        }
+        std::cout << std::endl;
+        for (size_t i = 0; i < 10; i++) {
+            std::cout << b[i] << " ";
+        }
+        std::cout << std::endl;
+        for (size_t i = 0; i < 10; i++) {
+            std::cout << c[i] << " ";
+        }
+        std::cout << std::endl;
+
+        for (size_t i = 0; i < MAXN; i++) {
+            if (fabs(c[i] - a[i] - b[i]) > EPS) {
+                std::cerr << "ERROR: Wrong answer!" << std::endl;
+                exit(1);
+            }
+        }
+        std::cout << "OK: Computation is correct" << std::endl;
     }
 
   private:
@@ -108,57 +141,24 @@ class Adder {
         // encoder->endEncoding();
     }
 
-    // void prepareData() {
-    //     populate_random_float(buffer_a_, MAXN);
-    //     populate_random_float(buffer_b_, MAXN);
-    // }
+    void populate_random_float(MTL::Buffer *b, size_t n) {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        float min_val = 1.0f;
+        float max_val = 10.0f;
+        std::uniform_real_distribution<float> dis(min_val, max_val);
 
-    // void verify() {
-    //     float *a = (float *)buffer_a_->contents();
-    //     float *b = (float *)buffer_b_->contents();
-    //     float *c = (float *)buffer_c_->contents();
-
-    //     std::cout << "First 10 elements of each: " << std::endl;
-    //     for (size_t i = 0; i < 10; i++) {
-    //         std::cout << a[i] << " ";
-    //     }
-    //     std::cout << std::endl;
-    //     for (size_t i = 0; i < 10; i++) {
-    //         std::cout << b[i] << " ";
-    //     }
-    //     std::cout << std::endl;
-    //     for (size_t i = 0; i < 10; i++) {
-    //         std::cout << c[i] << " ";
-    //     }
-    //     std::cout << std::endl;
-
-    //     for (size_t i = 0; i < MAXN; i++) {
-    //         if (fabs(c[i] - a[i] - b[i]) > EPS) {
-    //             std::cerr << "ERROR: Wrong answer!" << std::endl;
-    //             exit(1);
-    //         }
-    //     }
-    //     std::cout << "OK: Computation is correct" << std::endl;
-    // }
-
-    // void populate_random_float(MTL::Buffer *b, size_t n) {
-    //     std::random_device rd;
-    //     std::mt19937 gen(rd());
-    //     float min_val = 1.0f;
-    //     float max_val = 10.0f;
-    //     std::uniform_real_distribution<float> dis(min_val, max_val);
-
-    //     float *content = (float *)b->contents();
-    //     for (size_t i = 0; i < n; i++) {
-    //         content[i] = dis(gen);
-    //     }
-    // }
+        float *content = (float *)b->contents();
+        for (size_t i = 0; i < n; i++) {
+            content[i] = dis(gen);
+        }
+    }
 
     MTL::Device *device_;
 
     MTL::CommandQueue *queue_;
     MTL::ComputePipelineState *add_pso_;
-    // MTL::Buffer *buffer_a_, *buffer_b_, *buffer_c_;
+    MTL::Buffer *buffer_a_, *buffer_b_, *buffer_c_;
 };
 
 int main() {
@@ -169,10 +169,10 @@ int main() {
 
     Adder *adder = Adder::create(device);
     assert(adder != nullptr);
-    // adder->prepareData();
+    adder->prepareData();
     adder->sendComputeCommand();
 
-    // adder->verify();
+    adder->verify();
 
     return 0;
 }
