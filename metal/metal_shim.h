@@ -106,7 +106,7 @@ class Buffer {
 
   private:
     void *buf_;
-    uint32_t length_;
+    NS::UInteger length_;
     uint32_t buffer_id_;
 };
 

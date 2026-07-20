@@ -272,6 +272,7 @@ void *Buffer::contents() {
     return buf_;
 }
 
+// TODO: RPC call to release server side bytes.
 void Buffer::release() {
     free(buf_);
 }
