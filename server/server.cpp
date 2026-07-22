@@ -65,6 +65,17 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
 
+    Status ReleaseCommandQueueShim(ServerContext *context, const ReleaseCommandQueueShimRequest *request, ReleaseCommandQueueShimResponse *response) override {
+        auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
+        if (command_queue_itr == command_queue_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find command queue.");
+        }
+
+        command_queue_itr->second->release();
+        command_queue_map_.erase(command_queue_itr);
+        return Status::OK;
+    }
+
     Status CreateLibraryShim(ServerContext *context, const CreateLibraryShimRequest *request, CreateLibraryShimResponse *response) override {
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
@@ -81,6 +92,17 @@ class ShimmerImpl final : public TnrcService::Service {
         counter_++;
         library_map_[counter_] = library;
         response->set_library_id(counter_);
+        return Status::OK;
+    }
+
+    Status ReleaseLibraryShim(ServerContext *context, const ReleaseLibraryShimRequest *request, ReleaseLibraryShimResponse *response) override {
+        auto library_itr = library_map_.find(request->library_id());
+        if (library_itr == library_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find library.");
+        }
+
+        library_itr->second->release();
+        library_map_.erase(library_itr);
         return Status::OK;
     }
 
@@ -137,6 +159,17 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
 
+    Status ReleaseComputePipelineStateShim(ServerContext *context, const ReleaseComputePipelineStateShimRequest *request, ReleaseComputePipelineStateShimResponse *response) override {
+        auto compute_pipeline_state_itr = compute_pipeline_state_map_.find(request->compute_pipeline_state_id());
+        if (compute_pipeline_state_itr == compute_pipeline_state_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find compute pipeline state.");
+        }
+
+        compute_pipeline_state_itr->second->release();
+        compute_pipeline_state_map_.erase(compute_pipeline_state_itr);
+        return Status::OK;
+    }
+
     Status CreateBufferShim(ServerContext *context, const CreateBufferShimRequest *request, CreateBufferShimResponse *response) override {
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
@@ -150,6 +183,17 @@ class ShimmerImpl final : public TnrcService::Service {
         counter_++;
         buffer_map_[counter_] = buffer;
         response->set_buffer_id(counter_);
+        return Status::OK;
+    }
+
+    Status ReleaseBufferShim(ServerContext *context, const ReleaseBufferShimRequest *request, ReleaseBufferShimResponse *response) override {
+        auto buffer_itr = buffer_map_.find(request->buffer_id());
+        if (buffer_itr == buffer_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find buffer.");
+        }
+
+        buffer_itr->second->release();
+        buffer_map_.erase(buffer_itr);
         return Status::OK;
     }
     Status CommitCommandBuffer(ServerContext *context, const CommitCommandBufferRequest *request, CommitCommandBufferResponse *response) override {
