@@ -60,6 +60,24 @@ class TnrcServiceClient {
         }
     }
 
+    bool ReleaseCommandQueue(uint32_t command_queue_id) {
+        ReleaseCommandQueueShimRequest request;
+        ReleaseCommandQueueShimResponse response;
+        ClientContext context;
+
+        request.set_command_queue_id(command_queue_id);
+
+        Status status = stub_->ReleaseCommandQueueShim(&context, request, &response);
+
+        if (status.ok()) {
+            return true;
+        }
+
+        std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                  << std::endl;
+        return false;
+    }
+
     std::optional<uint32_t> CreateLibrary(uint32_t device_id, const NS::String *source, const CompileOptions *options, NS::Error **error) {
         CreateLibraryShimRequest request;
         CreateLibraryShimResponse response;
@@ -79,6 +97,24 @@ class TnrcServiceClient {
                       << std::endl;
             return std::nullopt;
         }
+    }
+
+    bool ReleaseLibrary(uint32_t library_id) {
+        ReleaseLibraryShimRequest request;
+        ReleaseLibraryShimResponse response;
+        ClientContext context;
+
+        request.set_library_id(library_id);
+
+        Status status = stub_->ReleaseLibraryShim(&context, request, &response);
+
+        if (status.ok()) {
+            return true;
+        }
+
+        std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                  << std::endl;
+        return false;
     }
 
     std::optional<uint32_t> CreateFunction(uint32_t device_id, const NS::String *function_name) {
@@ -141,6 +177,24 @@ class TnrcServiceClient {
         }
     }
 
+    bool ReleaseComputePipelineState(uint32_t compute_pipeline_state_id) {
+        ReleaseComputePipelineStateShimRequest request;
+        ReleaseComputePipelineStateShimResponse response;
+        ClientContext context;
+
+        request.set_compute_pipeline_state_id(compute_pipeline_state_id);
+
+        Status status = stub_->ReleaseComputePipelineStateShim(&context, request, &response);
+
+        if (status.ok()) {
+            return true;
+        }
+
+        std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                  << std::endl;
+        return false;
+    }
+
     Buffer *CreateBuffer(uint32_t device_id, NS::UInteger length, ResourceOptions options) {
         CreateBufferShimRequest request;
         CreateBufferShimResponse response;
@@ -161,6 +215,24 @@ class TnrcServiceClient {
                       << std::endl;
             return NULL;
         }
+    }
+
+    bool ReleaseBuffer(uint32_t buffer_id) {
+        ReleaseBufferShimRequest request;
+        ReleaseBufferShimResponse response;
+        ClientContext context;
+
+        request.set_buffer_id(buffer_id);
+
+        Status status = stub_->ReleaseBufferShim(&context, request, &response);
+
+        if (status.ok()) {
+            return true;
+        }
+
+        std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                  << std::endl;
+        return false;
     }
 
     bool CommitCommandBuffer(CommandBuffer *command_buffer) {
@@ -243,7 +315,7 @@ class TnrcServiceClient {
 // Subsequence calls returns the same client.
 TnrcServiceClient &Client() {
     static TnrcServiceClient client(grpc::CreateChannel(
-        "localhost:50051", grpc::InsecureChannelCredentials()));
+        "0.0.0.0:50051", grpc::InsecureChannelCredentials()));
     return client;
 }
 } // namespace
@@ -295,8 +367,10 @@ void CommandBuffer::commit() {
 void CommandBuffer::waitUntilCompleted() {
     Client().WaitUnitlCompleted(this);
 }
-// TODO: Make rpc call.
 void CommandQueue::release() {
+    if (Client().ReleaseCommandQueue(command_queue_id_)) {
+        delete this;
+    }
 }
 
 Library *Device::newLibrary(const NS::String *source, const CompileOptions *options, NS::Error **error) {
@@ -323,8 +397,11 @@ Function *Library::newFunction(const NS::String *function_name) {
     return new Function(function_id.value());
 }
 
-// TODO: Make rpc call.
-void Library::release() {}
+void Library::release() {
+    if (Client().ReleaseLibrary(library_id_)) {
+        delete this;
+    }
+}
 
 void Function::release() {
     if (Client().ReleaseFunction(function_id_)) {
@@ -350,9 +427,11 @@ void *Buffer::contents() {
     return buf_;
 }
 
-// TODO: RPC call to release server side bytes.
 void Buffer::release() {
-    free(buf_);
+    if (Client().ReleaseBuffer(buffer_id_)) {
+        free(buf_);
+        delete this;
+    }
 }
 
 Buffer *Device::newBuffer(NS::UInteger length, MTL::ResourceOptions options) {
@@ -366,7 +445,10 @@ Buffer *Device::newBuffer(NS::UInteger length, MTL::ResourceOptions options) {
     }
     return nullptr;
 }
-// TODO: Make rpc call.
-void ComputePipelineState::release() {}
+void ComputePipelineState::release() {
+    if (Client().ReleaseComputePipelineState(compute_pipeline_state_id_)) {
+        delete this;
+    }
+}
 
 } // namespace MetalShim

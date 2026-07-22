@@ -115,6 +115,13 @@ which is not the claim being made.)
       be designed for this, it is not automatic.
 - [ ] Write up results in blog-notes.md
 
+## Post-MVP hardening
+
+- [ ] Handle failed gRPC statuses before using response data.
+- [ ] Validate malformed RPC data server-side, including parallel repeated-field
+      lengths and packed buffer-data sizes.
+- [ ] Clean up completed server command buffers.
+
 ## Optimizations (after the skeleton works)
 
 - [ ] Pipelining: encode command buffer N+1 while the GPU runs N
