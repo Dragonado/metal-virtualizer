@@ -7,6 +7,7 @@
 #include <Foundation/Foundation.hpp>
 #include <Metal/Metal.hpp>
 
+#include <grpc/impl/channel_arg_names.h>
 #include <grpcpp/grpcpp.h>
 #include <iostream>
 #include <memory>
@@ -312,10 +313,15 @@ void RunServer(uint16_t port) {
     ShimmerImpl service;
 
     ServerBuilder builder;
+    builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0); // only one server per port
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
 
     std::unique_ptr<Server> server(builder.BuildAndStart());
+    if (server == nullptr) {
+        std::cerr << "Could not start server on " << server_address << std::endl;
+        return;
+    }
     std::cout << "Server listening on " << server_address << std::endl;
 
     server->Wait();

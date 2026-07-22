@@ -315,7 +315,7 @@ class TnrcServiceClient {
 // Subsequence calls returns the same client.
 TnrcServiceClient &Client() {
     static TnrcServiceClient client(grpc::CreateChannel(
-        "localhost:50051", grpc::InsecureChannelCredentials()));
+        "0.0.0.0:50051", grpc::InsecureChannelCredentials()));
     return client;
 }
 } // namespace

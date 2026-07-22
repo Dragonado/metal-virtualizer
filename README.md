@@ -35,3 +35,14 @@ Editor IntelliSense (regenerates compile_commands.json):
 ```sh
 bazel run //:refresh_compile_commands
 ```
+
+## Next steps
+
+Smallest path to a two-client utilization experiment:
+
+- Keep global handles; no session ID is needed for this controlled prototype.
+- Add a mutex for `counter_` and all server handle maps.
+- Run two clients against one server.
+- Use larger, bursty workloads: the 100-element vector-add is too short to
+  measure.
+- Measure utilization with one client, then with both clients.
