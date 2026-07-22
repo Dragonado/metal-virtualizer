@@ -87,6 +87,10 @@ policy is deferred.
 - [ ] FIFO submission of committed command buffers across tenants (this IS the gap-fill mechanism, not a separate component)
 - [ ] Synchronize shared server handle tables and ID allocation before allowing
       concurrent RPC handlers to mutate them.
+- [ ] Start with one mutex for `counter_` and all handle maps. Keep its critical
+      sections to ID/map bookkeeping only; do not hold it while waiting for the
+      GPU. Consider per-map locks only after measuring contention, with a fixed
+      lock order and safe object lifetimes after lookup.
 - [ ] DEFERRED (stretch): fair-share / priority policy. Sub-kernel preemption is not exposed by the Metal API, do not attempt.
 
 ### VM test setup (optional)

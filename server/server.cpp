@@ -37,19 +37,23 @@ class ShimmerImpl final : public TnrcService::Service {
         counter_ = 0;
     }
     Status CreateSystemDefaultDeviceShim(ServerContext *context, const CreateSystemDefaultDeviceShimRequest *request, CreateSystemDefaultDeviceShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         MTL::Device *device;
         device = MTL::CreateSystemDefaultDevice();
         if (device == nullptr) {
             return Status(StatusCode::INTERNAL, "Could not create metal device.");
         }
+
         counter_++;
         device_map_[counter_] = device;
         response->set_device_id(counter_);
         response->set_device_name(device->name()->cString(NS::UTF8StringEncoding));
+
         return Status::OK;
     }
 
     Status CreateCommandQueueShim(ServerContext *context, const CreateCommandQueueShimRequest *request, CreateCommandQueueShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find device.");
@@ -67,6 +71,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseCommandQueueShim(ServerContext *context, const ReleaseCommandQueueShimRequest *request, ReleaseCommandQueueShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
         if (command_queue_itr == command_queue_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find command queue.");
@@ -78,6 +83,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateLibraryShim(ServerContext *context, const CreateLibraryShimRequest *request, CreateLibraryShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find device.");
@@ -97,6 +103,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseLibraryShim(ServerContext *context, const ReleaseLibraryShimRequest *request, ReleaseLibraryShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto library_itr = library_map_.find(request->library_id());
         if (library_itr == library_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find library.");
@@ -108,6 +115,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateFunctionShim(ServerContext *context, const CreateFunctionShimRequest *request, CreateFunctionShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto library_itr = library_map_.find(request->library_id());
         if (library_itr == library_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find library.");
@@ -125,6 +133,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseFunctionShim(ServerContext *context, const ReleaseFunctionShimRequest *request, ReleaseFunctionShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto function_itr = function_map_.find(request->function_id());
         if (function_itr == function_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find function.");
@@ -136,6 +145,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateComputePipelineStateShim(ServerContext *context, const CreateComputePipelineStateShimRequest *request, CreateComputePipelineStateShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find device.");
@@ -161,6 +171,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseComputePipelineStateShim(ServerContext *context, const ReleaseComputePipelineStateShimRequest *request, ReleaseComputePipelineStateShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto compute_pipeline_state_itr = compute_pipeline_state_map_.find(request->compute_pipeline_state_id());
         if (compute_pipeline_state_itr == compute_pipeline_state_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find compute pipeline state.");
@@ -172,6 +183,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateBufferShim(ServerContext *context, const CreateBufferShimRequest *request, CreateBufferShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find device.");
@@ -188,6 +200,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseBufferShim(ServerContext *context, const ReleaseBufferShimRequest *request, ReleaseBufferShimResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto buffer_itr = buffer_map_.find(request->buffer_id());
         if (buffer_itr == buffer_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find buffer.");
@@ -198,6 +211,7 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
     Status CommitCommandBuffer(ServerContext *context, const CommitCommandBufferRequest *request, CommitCommandBufferResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
         if (command_queue_itr == command_queue_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find command queue.");
@@ -238,6 +252,7 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
     Status WaitUntilCompleted(ServerContext *context, const WaitUntilCompletedRequest *request, WaitUntilCompletedResponse *response) override {
+        std::lock_guard<std::mutex> lock(mtx_);
         auto command_buffer_itr = command_buffer_map_.find(request->command_buffer_id());
         if (command_buffer_itr == command_buffer_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find command buffer.");
@@ -306,6 +321,7 @@ class ShimmerImpl final : public TnrcService::Service {
     std::map<uint32_t, MTL::CommandQueue *> command_queue_map_;
     std::map<uint32_t, MTL::Buffer *> buffer_map_;
     std::map<uint32_t, MTL::Device *> device_map_;
+    std::mutex mtx_;
 };
 
 void RunServer(uint16_t port) {

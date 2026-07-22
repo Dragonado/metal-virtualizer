@@ -32,3 +32,12 @@ This makes the single scheduling point explicit.
 Once multiple clients are active, shared handle maps and the next-ID counter
 need synchronization. Without it, concurrent create or release RPCs can race,
 corrupt bookkeeping, or reuse IDs incorrectly.
+
+Use one shared mutex for every access to the maps and `counter_` as the first
+correct implementation. Separate mutexes for readers and writers do not help:
+they must lock the same mutex to exclude one another. A single mutex also
+serializes independent operations such as creating a buffer and releasing a
+pipeline state, but that cost is small when the lock covers only map operations.
+Never hold it across `waitUntilCompleted()` or another long-running GPU action,
+or it accidentally serializes tenants. Finer-grained locks later require a
+fixed lock order and an explicit rule for object lifetime after map lookup.

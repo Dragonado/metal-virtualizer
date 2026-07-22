@@ -220,6 +220,32 @@ GPU-less tenants each think they own the card. The distance between how many
 handles clients hold (many) and how many GPUs exist (one) is the whole space the
 system operates in.
 
+## A mutex protects an agreement, not a map
+
+When two gRPC handlers run at once, the server's maps and `counter_` are shared
+memory. A mutex does not somehow attach protection to a `std::map`. It works
+only because every path that reads or writes that shared state agrees to lock
+the *same* mutex first. If a reader locks `reader_mutex` and a writer locks
+`writer_mutex`, they can still access the same map at the same time. The two
+locks protect different things, so the map is still racing.
+
+The easiest correct first implementation is one `maps_mutex` for `counter_` and
+all handle maps. It is deliberately coarse: while `CreateBufferShim` holds it,
+`ReleaseComputePipelineStateShim` must wait even though those operations touch
+different maps. That is unnecessary serialization, but not necessarily a
+meaningful performance problem. The critical sections should only find, insert,
+erase, and allocate IDs; those are short CPU operations. Do not hold that mutex
+while waiting for the GPU or doing a blocking RPC, because then a tiny
+bookkeeping lock becomes a full tenant-serialization lock.
+
+Per-map mutexes can recover concurrency later. They also create a harder
+problem: handlers such as `CommitCommandBuffer` need a queue, a pipeline, and
+several buffers, so they may need several locks. Then the code needs a fixed
+lock order to avoid deadlocks, and it needs an object-lifetime rule so another
+thread cannot release a buffer just after commit finds its raw pointer. One
+mutex is the right first correctness tool; finer locks are an optimization once
+the scheduler is measured.
+
 ## This is Metal remoting, not the existing container-GPU paths
 
 There are already good ways to accelerate llama.cpp from a Linux container on
