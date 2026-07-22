@@ -9,6 +9,8 @@ service TnrcService {
   rpc ReleaseFunctionShim(ReleaseFunctionShimRequest) returns (ReleaseFunctionShimResponse);
   rpc CreateComputePipelineStateShim(CreateComputePipelineStateShimRequest) returns (CreateComputePipelineStateShimResponse);
   rpc CreateBufferShim(CreateBufferShimRequest) returns (CreateBufferShimResponse);
+  rpc CommitCommandBuffer(CommitCommandBufferRequest) returns (CommitCommandBufferResponse);
+  rpc WaitUntilCompleted(WaitUntilCompletedRequest) returns (WaitUntilCompletedResponse);
 }
 
 message CreateSystemDefaultDeviceShimRequest {}
@@ -75,4 +77,31 @@ message CreateBufferShimRequest {
 
 message CreateBufferShimResponse {
   uint32 buffer_id = 1;
+}
+
+message CommitCommandBufferRequest {
+  uint32 command_queue_id = 1;
+  uint32 compute_pipeline_state_id = 2;
+  sint64 grid_size = 3;
+  sint64 thread_group_size = 4;
+
+  // buffer parameters
+  repeated uint32 buffer_ids = 5 [packed = true];
+  repeated uint32 buffer_offsets = 6 [packed = true];
+  repeated uint32 index_map = 7 [packed = true];
+
+  bytes all_buffer_data = 8;
+}
+
+message CommitCommandBufferResponse {
+  uint32 command_buffer_id = 1;
+}
+
+message WaitUntilCompletedRequest {
+  uint32 command_buffer_id = 1;
+  repeated uint32 buffer_ids = 2 [packed = true];
+}
+
+message WaitUntilCompletedResponse {
+  bytes all_buffer_data = 1;
 }

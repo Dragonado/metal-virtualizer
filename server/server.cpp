@@ -145,11 +145,83 @@ class ShimmerImpl final : public TnrcService::Service {
 
         MTL::Buffer *buffer = device_itr->second->newBuffer(request->length(), request->options());
         if (buffer == nullptr) {
-            return Status(StatusCode::INTERNAL, "Could not create buffer");
+            return Status(StatusCode::INTERNAL, "Could not create buffer.");
         }
         counter_++;
         buffer_map_[counter_] = buffer;
         response->set_buffer_id(counter_);
+        return Status::OK;
+    }
+    Status CommitCommandBuffer(ServerContext *context, const CommitCommandBufferRequest *request, CommitCommandBufferResponse *response) override {
+        auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
+        if (command_queue_itr == command_queue_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find command queue.");
+        }
+
+        auto compute_pipeline_state_itr = compute_pipeline_state_map_.find(request->compute_pipeline_state_id());
+        if (compute_pipeline_state_itr == compute_pipeline_state_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find compute pipeline state.");
+        }
+
+        MTL::CommandBuffer *command_buffer = command_queue_itr->second->commandBuffer();
+        MTL::ComputeCommandEncoder *compute_command_encoder = command_buffer->computeCommandEncoder();
+        compute_command_encoder->setComputePipelineState(compute_pipeline_state_itr->second);
+
+        assert(request->buffer_ids_size() == request->buffer_offsets_size());
+        assert(request->buffer_ids_size() == request->index_map_size());
+
+        size_t offset = 0;
+        for (size_t i = 0; i < request->buffer_ids().size(); i++) {
+            auto buffer_itr = buffer_map_.find(request->buffer_ids().Get(i));
+            if (buffer_itr == buffer_map_.end()) {
+                return Status(StatusCode::NOT_FOUND, "Could not find buffer.");
+            }
+
+            memcpy(buffer_itr->second->contents(), request->all_buffer_data().data() + offset, buffer_itr->second->length());
+            compute_command_encoder->setBuffer(buffer_itr->second, request->buffer_offsets().Get(i), request->index_map().Get(i));
+            offset += buffer_itr->second->length();
+        }
+
+        compute_command_encoder->dispatchThreads(MTL::Size(request->grid_size(), 1, 1), MTL::Size(request->thread_group_size(), 1, 1));
+        compute_command_encoder->endEncoding();
+        command_buffer->commit();
+
+        counter_++;
+        command_buffer_map_[counter_] = command_buffer;
+
+        response->set_command_buffer_id(counter_);
+        return Status::OK;
+    }
+    Status WaitUntilCompleted(ServerContext *context, const WaitUntilCompletedRequest *request, WaitUntilCompletedResponse *response) override {
+        auto command_buffer_itr = command_buffer_map_.find(request->command_buffer_id());
+        if (command_buffer_itr == command_buffer_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find command buffer.");
+        }
+
+        command_buffer_itr->second->waitUntilCompleted();
+
+        size_t total_size = 0;
+        std::vector<MTL::Buffer *> buffers;
+
+        for (int i = 0; i < request->buffer_ids_size(); ++i) {
+            auto buffer_itr = buffer_map_.find(request->buffer_ids(i));
+
+            if (buffer_itr == buffer_map_.end()) {
+                return Status(StatusCode::NOT_FOUND, "Could not find buffer.");
+            }
+
+            MTL::Buffer *buffer = buffer_itr->second;
+            buffers.push_back(buffer);
+            total_size += buffer->length();
+        }
+        response->mutable_all_buffer_data()->resize(total_size);
+
+        size_t offset = 0;
+        for (MTL::Buffer *buffer : buffers) {
+            memcpy(response->mutable_all_buffer_data()->data() + offset, buffer->contents(), buffer->length());
+            offset += buffer->length();
+        }
+
         return Status::OK;
     }
     ~ShimmerImpl() {
@@ -185,6 +257,7 @@ class ShimmerImpl final : public TnrcService::Service {
     std::map<uint32_t, MTL::ComputePipelineState *> compute_pipeline_state_map_;
     std::map<uint32_t, MTL::Function *> function_map_;
     std::map<uint32_t, MTL::Library *> library_map_;
+    std::map<uint32_t, MTL::CommandBuffer *> command_buffer_map_;
     std::map<uint32_t, MTL::CommandQueue *> command_queue_map_;
     std::map<uint32_t, MTL::Buffer *> buffer_map_;
     std::map<uint32_t, MTL::Device *> device_map_;

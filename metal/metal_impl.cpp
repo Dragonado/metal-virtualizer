@@ -164,7 +164,74 @@ class TnrcServiceClient {
     }
 
     bool CommitCommandBuffer(CommandBuffer *command_buffer) {
-        // TODO: make rpc call.
+        if (command_buffer->get_compute_encoder() == NULL) {
+            std::cerr << "[SHIM] Nothing encoded in command buffer." << std::endl;
+            return true;
+        }
+
+        ComputeCommandEncoder *compute_command_encoder = command_buffer->get_compute_encoder();
+
+        if (compute_command_encoder->get_compute_pipeline_state() == NULL) {
+            std::cerr << "[SHIM] No pipeline to run in compute encoder." << std::endl;
+            return true;
+        }
+
+        CommitCommandBufferRequest request;
+        CommitCommandBufferResponse response;
+        ClientContext context;
+
+        request.set_command_queue_id(command_buffer->get_command_queue_id());
+        request.set_compute_pipeline_state_id(compute_command_encoder->get_compute_pipeline_state()->compute_pipeline_state_id());
+        request.set_grid_size(compute_command_encoder->get_grid_size().width);
+        request.set_thread_group_size(compute_command_encoder->get_thread_group_size().width);
+
+        for (const auto &binding :
+             compute_command_encoder->get_all_encoder_buffer_structs()) {
+            Buffer *buffer = binding.buf;
+
+            request.add_buffer_ids(buffer->buffer_id());
+            request.add_buffer_offsets(binding.offset);
+            request.add_index_map(binding.index);
+
+            request.mutable_all_buffer_data()->append(
+                static_cast<const char *>(buffer->contents()),
+                buffer->length());
+        }
+
+        Status status = stub_->CommitCommandBuffer(&context, request, &response);
+
+        command_buffer->set_command_buffer_id(response.command_buffer_id());
+
+        return true;
+    }
+
+    bool WaitUnitlCompleted(CommandBuffer *command_buffer) {
+        if (command_buffer->get_compute_encoder() == NULL) {
+            std::cerr << "[SHIM] Nothing encoded in command buffer." << std::endl;
+            return true;
+        }
+
+        WaitUntilCompletedRequest request;
+        WaitUntilCompletedResponse response;
+        ClientContext context;
+
+        request.set_command_buffer_id(command_buffer->get_command_buffer_id());
+        std::vector<uint32_t> buffer_ids = command_buffer->get_all_buffer_ids();
+        request.mutable_buffer_ids()->Assign(buffer_ids.begin(), buffer_ids.end());
+
+        Status status = stub_->WaitUntilCompleted(&context, request, &response);
+
+        ComputeCommandEncoder *compute_command_encoder = command_buffer->get_compute_encoder();
+
+        size_t offset = 0;
+        for (const auto &binding :
+             compute_command_encoder->get_all_encoder_buffer_structs()) {
+            Buffer *buffer = binding.buf;
+
+            memcpy(buffer->contents(), response.all_buffer_data().data() + offset, buffer->length());
+            offset += buffer->length();
+        }
+
         return true;
     }
 
@@ -209,13 +276,24 @@ CommandBuffer *CommandQueue::commandBuffer() {
     return (new CommandBuffer(command_queue_id_));
 }
 
+ComputeCommandEncoder *CommandBuffer::computeCommandEncoder() {
+    if (compute_command_encoder_ != NULL) {
+        std::cerr << "[SHIM] ERROR: Shim only supports single compute encoder per buffer for now." << std::endl;
+        return NULL;
+    }
+    compute_command_encoder_ = new ComputeCommandEncoder();
+    return compute_command_encoder_;
+}
+
 // TODO: Make RPC call.
 void CommandBuffer::commit() {
-    assert(Client().CommitCommandBuffer(this));
+    bool b = Client().CommitCommandBuffer(this);
+    assert(b);
 }
 
 // TODO: Block until we get response from RPC.
 void CommandBuffer::waitUntilCompleted() {
+    Client().WaitUnitlCompleted(this);
 }
 // TODO: Make rpc call.
 void CommandQueue::release() {

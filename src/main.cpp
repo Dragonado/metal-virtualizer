@@ -71,10 +71,9 @@ class Adder {
 
     void sendComputeCommand() {
         MTL::CommandBuffer *command_buffer = queue_->commandBuffer();
-        // MTL::ComputeCommandEncoder *encoder = command_buffer->computeCommandEncoder();
+        MTL::ComputeCommandEncoder *encoder = command_buffer->computeCommandEncoder();
 
-        // encodeAddCommand(encoder);
-        encodeAddCommand(NULL);
+        encodeAddCommand(encoder);
 
         command_buffer->commit();
 
@@ -124,10 +123,10 @@ class Adder {
 
   private:
     void encodeAddCommand(MTL::ComputeCommandEncoder *encoder) {
-        // encoder->setComputePipelineState(add_pso_);
-        // encoder->setBuffer(buffer_a_, 0, 0);
-        // encoder->setBuffer(buffer_b_, 0, 1);
-        // encoder->setBuffer(buffer_c_, 0, 2);
+        encoder->setComputePipelineState(add_pso_);
+        encoder->setBuffer(buffer_a_, 0, 0);
+        encoder->setBuffer(buffer_b_, 0, 1);
+        encoder->setBuffer(buffer_c_, 0, 2);
 
         MTL::Size grid_size = MTL::Size(MAXN, 1, 1);
         NS::Integer tg_size = add_pso_->maxTotalThreadsPerThreadgroup();
@@ -136,9 +135,9 @@ class Adder {
         }
         MTL::Size thread_group_size = MTL::Size(tg_size, 1, 1);
 
-        // encoder->dispatchThreads(grid_size, thread_group_size);
+        encoder->dispatchThreads(grid_size, thread_group_size);
 
-        // encoder->endEncoding();
+        encoder->endEncoding();
     }
 
     void populate_random_float(MTL::Buffer *b, size_t n) {

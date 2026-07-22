@@ -53,40 +53,6 @@ class ComputePipelineState {
     NS::Integer max_total_threads_per_threadgroup_;
 };
 
-class ComputeCommandEncoder {
-  public:
-    void setComputePipelineState(ComputePipelineState *compute_pipeline_state);
-    void dispatchThreads(Size grid_size, Size thread_group_size);
-    void endEncoding();
-
-  private:
-};
-
-class CommandBuffer {
-  public:
-    CommandBuffer(uint32_t command_queue_id) : command_queue_id_(command_queue_id) {}
-
-    ComputeCommandEncoder *computeCommandEncoder();
-
-    void commit();
-
-    void waitUntilCompleted();
-
-  private:
-    uint32_t command_queue_id_;
-};
-
-class CommandQueue {
-  public:
-    CommandQueue(uint32_t command_queue_id) : command_queue_id_(command_queue_id) {}
-
-    CommandBuffer *commandBuffer();
-    void release();
-
-  private:
-    uint32_t command_queue_id_;
-};
-
 class Buffer {
   public:
     Buffer(uint32_t buffer_id, NS::UInteger length, ResourceOptions options) {
@@ -100,6 +66,10 @@ class Buffer {
 
     void release();
 
+    NS::UInteger length() {
+        return length_;
+    }
+
     uint32_t buffer_id() {
         return buffer_id_;
     }
@@ -108,6 +78,122 @@ class Buffer {
     void *buf_;
     NS::UInteger length_;
     uint32_t buffer_id_;
+};
+
+class ComputeCommandEncoder {
+    struct encoderBufferStruct {
+        Buffer *buf;
+        NS::UInteger offset;
+        NS::UInteger index;
+    };
+
+  public:
+    ComputeCommandEncoder() {
+        end_encoding_ = false;
+    }
+    void setComputePipelineState(ComputePipelineState *compute_pipeline_state) {
+        assert(!end_encoding_);
+        compute_pipeline_state_ = compute_pipeline_state;
+    }
+    void dispatchThreads(Size grid_size, Size thread_group_size) {
+        assert(!end_encoding_);
+
+        // TODO: For now supporting only 1D.
+        assert(grid_size.height == 1 && grid_size.depth == 1);
+        assert(thread_group_size.height == 1 && thread_group_size.depth == 1);
+
+        grid_size_ = grid_size;
+        thread_group_size_ = thread_group_size;
+    }
+
+    void setBuffer(Buffer *buf, NS::UInteger offset, NS::UInteger index) {
+        assert(!end_encoding_);
+        encoder_buffer_structs_.push_back({buf, offset, index});
+    }
+
+    void endEncoding() {
+        end_encoding_ = true;
+    }
+
+    ComputePipelineState *get_compute_pipeline_state() {
+        return compute_pipeline_state_;
+    }
+
+    std::vector<encoderBufferStruct> get_all_encoder_buffer_structs() {
+        return encoder_buffer_structs_;
+    }
+
+    Size get_grid_size() {
+        return grid_size_;
+    }
+
+    Size get_thread_group_size() {
+        return thread_group_size_;
+    }
+
+  private:
+    bool end_encoding_;
+    ComputePipelineState *compute_pipeline_state_;
+    Size grid_size_;
+    Size thread_group_size_;
+    std::vector<encoderBufferStruct> encoder_buffer_structs_;
+};
+
+class CommandBuffer {
+  public:
+    CommandBuffer(uint32_t command_queue_id) : command_queue_id_(command_queue_id) {
+        command_buffer_id_ = 0;
+        compute_command_encoder_ = NULL;
+    }
+
+    ComputeCommandEncoder *computeCommandEncoder();
+
+    uint32_t get_command_queue_id() {
+        return command_queue_id_;
+    }
+
+    ComputeCommandEncoder *get_compute_encoder() {
+        return compute_command_encoder_;
+    }
+
+    void commit();
+
+    void waitUntilCompleted();
+
+    uint32_t get_command_buffer_id() {
+        return command_buffer_id_;
+    }
+
+    std::vector<uint32_t> get_all_buffer_ids() {
+        if (compute_command_encoder_ == NULL)
+            return {};
+        std::vector<uint32_t> buffer_ids;
+        for (auto encoder_buffer_struct : compute_command_encoder_->get_all_encoder_buffer_structs()) {
+            buffer_ids.push_back(encoder_buffer_struct.buf->buffer_id());
+        }
+        return buffer_ids;
+    }
+
+    void set_command_buffer_id(uint32_t command_buffer_id) {
+        command_buffer_id_ = command_buffer_id;
+    }
+
+  private:
+    uint32_t command_queue_id_;
+    // little bit different from others because its not really minted like others. Its more of a job id.
+    uint32_t command_buffer_id_;
+    ComputeCommandEncoder *compute_command_encoder_;
+};
+
+class CommandQueue {
+  public:
+    CommandQueue(uint32_t command_queue_id) : command_queue_id_(command_queue_id) {}
+
+    CommandBuffer *commandBuffer();
+    void release();
+
+  private:
+    uint32_t command_queue_id_;
 };
 
 class Device {
