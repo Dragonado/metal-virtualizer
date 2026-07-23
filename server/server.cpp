@@ -283,6 +283,8 @@ class ShimmerImpl final : public TnrcService::Service {
             offset += buffer->length();
         }
 
+        command_buffer_itr->second->release();
+        command_buffer_map_.erase(command_buffer_itr);
         return Status::OK;
     }
     ~ShimmerImpl() {
