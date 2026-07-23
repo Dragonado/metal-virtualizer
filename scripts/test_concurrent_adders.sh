@@ -3,23 +3,39 @@
 set -uo pipefail
 
 readonly CLIENT_COUNT=10
-readonly PORT=50051
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-bazel build //src:adder
+mode="remote"
+bazel_args=(--//src:shim=true)
+
+case "${1:-}" in
+    "")
+        ;;
+    --local)
+        mode="local"
+        bazel_args=(--//src:shim=false)
+        ;;
+    *)
+        echo "Usage: $0 [--local]"
+        exit 2
+        ;;
+esac
+
+if [[ "$mode" == "remote" ]]; then
+    echo "Running adders through the remote Metal shim. Start the server first."
+else
+    echo "Running adders directly on the local Metal GPU."
+fi
+
+bazel build "${bazel_args[@]}" //src:adder
+adder_binary="$(bazel cquery "${bazel_args[@]}" --output=files //src:adder)"
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/metal-virtualizer-concurrency.XXXXXX")"
-server_pid=""
 test_passed=false
 
 cleanup() {
-    if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
-        kill "$server_pid"
-        wait "$server_pid" 2>/dev/null || true
-    fi
-
     if "$test_passed"; then
         rm -rf "$log_dir"
     else
@@ -28,9 +44,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+start_time="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
+
 declare -a client_pids
 for ((i = 1; i <= CLIENT_COUNT; ++i)); do
-    bazel-bin/src/adder >"$log_dir/adder-$i.log" 2>&1 &
+    "$adder_binary" >"$log_dir/adder-$i.log" 2>&1 &
     client_pids[i]=$!
 done
 
@@ -48,10 +66,13 @@ for ((i = 1; i <= CLIENT_COUNT; ++i)); do
     fi
 done
 
+end_time="$(perl -MTime::HiRes=time -e 'printf "%.6f", time')"
+elapsed="$(perl -e 'printf "%.3f", $ARGV[1] - $ARGV[0]' "$start_time" "$end_time")"
+
 if ((failures > 0)); then
     echo "FAIL: $failures of $CLIENT_COUNT adders failed"
     exit 1
 fi
 
 test_passed=true
-echo "PASS: all $CLIENT_COUNT adders computed the correct result"
+echo "PASS: all $CLIENT_COUNT adders computed the correct result in $elapsed seconds"

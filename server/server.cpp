@@ -36,6 +36,7 @@ class ShimmerImpl final : public TnrcService::Service {
     ShimmerImpl() {
         counter_ = 0;
     }
+
     Status CreateSystemDefaultDeviceShim(ServerContext *context, const CreateSystemDefaultDeviceShimRequest *request, CreateSystemDefaultDeviceShimResponse *response) override {
         std::lock_guard<std::mutex> lock(mtx_);
         MTL::Device *device;
@@ -210,6 +211,7 @@ class ShimmerImpl final : public TnrcService::Service {
         buffer_map_.erase(buffer_itr);
         return Status::OK;
     }
+
     Status CommitCommandBuffer(ServerContext *context, const CommitCommandBufferRequest *request, CommitCommandBufferResponse *response) override {
         std::lock_guard<std::mutex> lock(mtx_);
         auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
@@ -252,6 +254,7 @@ class ShimmerImpl final : public TnrcService::Service {
         response->set_command_buffer_id(counter_);
         return Status::OK;
     }
+
     Status WaitUntilCompleted(ServerContext *context, const WaitUntilCompletedRequest *request, WaitUntilCompletedResponse *response) override {
         std::lock_guard<std::mutex> lock(mtx_);
         auto command_buffer_itr = command_buffer_map_.find(request->command_buffer_id());
@@ -287,6 +290,7 @@ class ShimmerImpl final : public TnrcService::Service {
         command_buffer_map_.erase(command_buffer_itr);
         return Status::OK;
     }
+
     ~ShimmerImpl() {
         // Order is important.
         for (auto &[id, compute_pipeline_state] : compute_pipeline_state_map_) {

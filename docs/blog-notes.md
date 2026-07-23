@@ -246,6 +246,317 @@ thread cannot release a buffer just after commit finds its raw pointer. One
 mutex is the right first correctness tool; finer locks are an optimization once
 the scheduler is measured.
 
+## A correct global lock can erase the reason to have a scheduler
+
+The first ten-client test made this visible. The same ten 100-element vector
+adds all completed correctly, but the timed client phase took 3.373 seconds
+through the remote shim and 1.182 seconds when the same program used local
+Metal directly: about 2.85 times slower remotely. The timer starts after Bazel
+has built the selected binary, so compilation is not included in either number.
+
+That 2.85x is not a measurement of mutex overhead alone. The remote path also
+pays for gRPC, protobuf serialization, copying each buffer into a message,
+crossing into the server process, and creating Metal setup objects separately
+for every adder. The workload is so small that these fixed costs dominate the
+kernel itself.
+
+The global mutex nevertheless has one specific, damaging effect. It covers the
+entire `WaitUntilCompleted` handler. A client that has committed a job then
+locks the server while it waits for the GPU. Another client's later `commit`
+cannot enter the server to make its already-recorded job available. The lock
+turns a short bookkeeping rule into admission control, and can reduce the
+system to whole-job serialization.
+
+This matters because the local GPU already time-shares native Metal work:
+
+```text
+native apps:
+  app A ─┐
+  app B ─┼→ Metal driver decides scheduling
+  app C ─┘
+
+your remoter:
+  remote client A ─┐
+  remote client B ─┼→ your server decides admission/order → Metal driver → GPU
+  remote client C ─┘
+```
+
+The remoter does not create the GPU's ability to share work. Its value is that
+GPU-less or remote clients can use that one GPU, and that the server can choose
+an explicit policy for their committed command buffers. Without concurrent
+admission and a policy that keeps another client's work ready during CPU gaps,
+the server is mostly a slower path to the same driver scheduler. The
+transparency experiment still matters, but the utilization claim needs the
+scheduler.
+
+## Thunder-style sole tenancy versus command-buffer multiplexing
+
+Thunder Compute's publicly described model is temporal oversubscription, not
+simultaneous multi-tenancy on one card. While a process is using a GPU, that
+process gets the complete card: all compute and all VRAM. When the process exits
+or Thunder decides that it is idle, the GPU can be detached and assigned to a
+different workload. Several persistent CPU instances can therefore share a
+smaller fleet of GPUs over time without two tenants occupying the same card at
+the same instant. Thunder reports this as a fleet-capacity result, not a claim
+that one remote job runs faster than native CUDA. Its public write-up reports
+about 1.8 times as many users served by its fleet while acknowledging that some
+remote workloads can run as much as roughly twice as slowly as native execution.
+
+```text
+time ---------------------------------------------------------------------->
+
+physical GPU:
+  [ client A owns the whole card ][handoff][ client B owns the whole card ]
+```
+
+This is an exclusive GPU lease. The closest simple equivalent in this project
+would assign the remoter's GPU to one `device_id` from `CreateDevice` until that
+client calls `Device::release()`. Commits from other device IDs would wait. On
+release, the server would finish outstanding work, destroy that client's Metal
+objects, clear the owner, and wake the next client. A condition variable would
+represent the waiting queue; a mutex alone is not a lease policy.
+
+Thunder also says it can hand a GPU away when a process "sits idle," but the
+public material does not define that idle threshold or explain how live VRAM
+state is preserved. Transparent handoff from a still-running process is the
+hard version. The system must either keep its resources resident, which denies
+the next tenant the full VRAM guarantee, or save those resources to host memory,
+release them, and recreate them when the first process returns. For this
+prototype, an explicit process-lifetime lease would be the honest
+Thunder-equivalent baseline.
+
+The command-buffer design makes the opposite choice. Multiple clients keep
+their server-side resources alive together. Every completed command buffer is a
+point where another ready client's work can be admitted:
+
+```text
+finish A1 -> run B1 -> run A2 -> run C1
+```
+
+This is finer than a process lease, but it is not preemption. Metal does not let
+the server pause command buffer A1 halfway through, execute B1, and resume A1.
+A five-second command buffer can still block every client behind it for five
+seconds. The scheduler controls which ready command buffer it submits next;
+Metal's driver retains final control over how submitted work executes on the
+hardware.
+
+| Property | Thunder-style exclusive lease | Command-buffer multiplexing |
+| --- | --- | --- |
+| Scheduling unit | Process or idle lease | Completed command-buffer boundary |
+| Tenants resident at once | One | Several |
+| VRAM promise | Whole card for the owner | Aggregate working sets must fit |
+| Switching | Coarse and potentially expensive | Fine and potentially fast |
+| Performance | Predictable while the lease is held | Contention and interference |
+| Cleanup | Reset one tenant at handoff | Track many live object graphs |
+| Isolation | Stronger boundary and memory wipe | Must be enforced in software |
+| Best workload | Large models that need most VRAM | Bursty jobs with smaller working sets |
+| Fleet behavior | Assign whole GPUs across a cluster | Order ready jobs on one GPU |
+
+The VRAM tradeoff is fundamental. If an 80 GB GPU serves two clients that each
+need 60 GB, an exclusive lease can run them one after the other. A resident
+command-buffer scheduler cannot hold both 60 GB working sets. The second
+allocation must fail, or the server must implement eviction and restoration.
+Once eviction exists, the design has reintroduced much of the hard state
+management that sole-tenancy handoff requires.
+
+The design choice in its clearest form:
+
+**Thunder's design deliberately chooses:**
+
+- full VRAM;
+- predictable performance;
+- simpler cleanup;
+- stronger isolation;
+- support for huge models;
+- cluster-wide GPU assignment.
+
+**This command-buffer design deliberately chooses:**
+
+- faster switching;
+- better opportunity for fine-grained gap filling;
+- shared resident state;
+- more contention;
+- harder fairness and security.
+
+Neither list dominates the other. Thunder optimizes fleet capacity while
+preserving the experience of a dedicated card. This project explores whether
+giving up that dedicated-card guarantee can reclaim smaller gaps inside long
+process lifetimes.
+
+### Concurrency is not yet security isolation
+
+Sole tenancy is not the only possible security mechanism, but the current
+prototype cannot claim tenant isolation. Its handles are global sequential
+integers, every RPC reaches shared maps, there is no authenticated client
+identity, and the server does not verify that a queue, pipeline, and buffers all
+belong to the same tenant. Some message relationships are checked with
+`assert`, packed byte lengths are not comprehensively validated before
+`memcpy`, and all remote tenants are represented inside one trusted server
+process. A client that guesses another client's ID can attempt to reference its
+objects.
+
+A credible software-enforced API isolation layer would need:
+
+1. an authenticated session identity on every RPC;
+2. a separate handle namespace per session, or unguessable capability handles;
+3. ownership and cross-object consistency checks on every request;
+4. complete bounds validation before all copies;
+5. per-tenant memory, command-size, and execution-time quotas;
+6. safe cleanup after normal exit, timeout, or broken connection;
+7. zeroing before memory is reused by another tenant;
+8. authenticated and encrypted transport outside a trusted local network.
+
+Even after those changes, the honest phrase is "software-enforced API-level
+isolation," not hardware isolation. Tenants still share caches, memory
+bandwidth, execution units, the Metal driver, and the server process. Timing
+side channels and denial-of-service remain possible. Apple exposes no public
+MIG-like hardware partition in this design.
+
+The encouraging part is that basic client isolation is practical here. Every
+operation already passes through the remoting server, so the server is a
+natural enforcement point. Giving every client an authenticated session ID,
+associating every Metal object with its owning session, and rejecting RPCs that
+refer to another session's objects would stop ordinary cross-client access
+through the API. Bounds checks, quotas, disconnect cleanup, and clearing memory
+before reuse complete a useful prototype-level isolation boundary.
+
+That work should not be confused with production-grade security. A hostile
+client can also try malicious shaders, excessive allocations, very long command
+buffers, malformed messages, timing measurements, and driver bugs. Preventing
+one client from guessing another client's buffer ID is comparatively
+straightforward. Remaining secure and available under every hostile input is a
+much larger project. The accurate claim is:
+
+> Software-enforced resource and memory isolation is practical for this design.
+> Basic ownership isolation is straightforward, but production-grade security
+> and side-channel resistance require considerably more work.
+
+### Shared resident state creates more concurrency than an exclusive lease
+
+Thunder's exclusive-lease model can largely reason about one owner at a time:
+
+> Client A owns the GPU. Only A's GPU state matters until the lease ends.
+
+This command-buffer design keeps A's, B's, and C's resources alive together,
+and their commands can be submitted in changing orders. That creates many more
+possible interleavings for the server to handle:
+
+- A can release a buffer while one of A's submitted command buffers still uses
+  it;
+- A can wait for completion while B commits more work;
+- several clients can create and release objects at the same time;
+- their combined allocations can exceed available VRAM;
+- one client can submit a long command buffer and delay everyone else;
+- a client can disconnect while its commands are queued or executing;
+- each result must be delivered to the client that submitted that job.
+
+This is substantially more concurrency complexity than sole tenancy, but it
+does not require uncontrolled parallel code in every RPC. The server can keep
+the design understandable by using short mutex-protected sections for maps and
+counters, retaining objects while submitted commands use them, and routing
+ready work through one scheduler thread. Each submitted job can have its own
+completion state so that clients wait independently without holding the global
+mutex.
+
+```text
+RPC threads -> validate and enqueue jobs -> one scheduler -> Metal -> per-job results
+```
+
+Metal and its driver still manage execution on the GPU. The remoter manages the
+lifetime, ordering, memory pressure, and fairness of several clients whose
+state remains resident at the same time. That additional complexity is the
+price of faster switching and finer gap filling.
+
+### The claim worth testing
+
+The defensible claim is not that this scheduler is categorically faster or more
+powerful than Thunder Compute. Thunder implements broad CUDA compatibility,
+fleet orchestration, state cleanup, and production security that this prototype
+does not. The specific claim is narrower and technically interesting:
+
+> I built a remote Metal API shim with command-buffer-granularity concurrent
+> admission, trading sole tenancy and full-VRAM guarantees for finer gap filling
+> across bursty tenants.
+
+The right experiment compares two server policies with the same remoting and
+copy overhead: an exclusive process lease versus concurrent command-buffer
+admission. Two tenants that each alternate between equal GPU work and CPU gaps
+give a useful ceiling. Exclusive leasing leaves roughly half of each lease idle;
+fine-grained admission can place B's ready command buffer into A's CPU gap and
+approach twice the aggregate throughput. Native local Metal remains the
+lower-overhead reference, not the intentionally weak baseline that the remoter
+must beat.
+
+Thunder references: [How Thunder Compute works (GPU-over-TCP)](https://www.thundercompute.com/blog/how-thunder-compute-works-gpu-over-tcp)
+and [GPU Virtualization: Approaches and Tradeoffs](https://www.thundercompute.com/blog/why-network-based-gpu-virtualization-is-the-future).
+
+## The contract: preserve Metal's meaning, not its timing
+
+The bold goal of this project is semantic transparency for the part of Metal it
+implements:
+
+> **If a valid Metal program compiles against the supported shim and completes
+> successfully, it produces the same observable result as local Metal. The shim
+> guarantees semantics, not performance, scheduling, or resource availability.
+> Unsupported APIs fail at compile time, and malicious clients are outside the
+> threat model.**
+
+Every qualification in that statement defines an important boundary.
+
+**"Supported shim" means only the implemented Metal subset.** The project does
+not yet implement the entire Metal API. If render encoding or another missing
+feature is absent from the shim headers, code that uses it can fail to compile.
+That is acceptable. The dangerous outcome is for unsupported code to compile
+and then silently behave differently, for example because a required method is
+implemented as a no-op.
+
+**"Valid Metal program" is stronger than "C++ code that compiles."** A compiler
+cannot prove that a program obeys object lifetimes, stays within buffer bounds,
+synchronizes correctly, or avoids races inside a shader. Native Metal does not
+assign useful semantics to every invalid program, so the remoter cannot promise
+to reproduce them. The baseline is a program that works correctly through
+native Metal on the corresponding server GPU.
+
+**"Honest client" defines the threat model.** An honest client uses the C++ shim
+normally. It does not forge protobuf messages, guess another client's object
+IDs, deliberately send malformed lengths, or try to attack the server. Global
+handles without ownership checks are acceptable under this limited research
+assumption. Software ownership isolation can be added later without changing
+the semantic-transparency goal, but defending against hostile tenants is a
+separate security project.
+
+**"Same observable result" describes what must be preserved.** A successful
+remote execution should produce the same buffer contents, command ordering,
+object relationships, lifetime behavior, and supported query results as the
+native program. Equivalent supported failures should also be reported as
+failures instead of allowing the client to use an invalid response.
+
+The promise does not require equal pointer addresses or internal handle IDs.
+Those values are implementation details. It also cannot promise bit-identical
+output for a native program whose shader contains a data race or whose result
+is otherwise nondeterministic. Device-specific queries describe the server GPU,
+because that is the GPU doing the work.
+
+**"Completes successfully" is necessary because resources are not guaranteed.**
+Several resident clients can exhaust VRAM. The network can disconnect, the
+server can stop, or a requested allocation can fail. The remoter therefore
+cannot promise that every accepted source program finishes. It can promise that
+once an operation is reported as successful, its observable result matches the
+native Metal operation for the same input and device.
+
+**Performance is explicitly outside the equivalence.** RPC latency, data copies,
+queueing, and scheduling can make remote execution slower. A future scheduler
+may also change which client's command runs first. Neither difference is a
+semantic error as long as each client's synchronization and command-ordering
+rules are preserved. The contract reproduces what the program computes, not how
+long the computation takes.
+
+This gives the project a strict implementation rule:
+
+> If the shim lets the user express a valid Metal program, the shim must
+> implement that program correctly. Missing functionality should be clearly
+> unavailable, not accepted and silently ignored.
+
 ## This is Metal remoting, not the existing container-GPU paths
 
 There are already good ways to accelerate llama.cpp from a Linux container on
