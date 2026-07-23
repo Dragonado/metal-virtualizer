@@ -272,6 +272,12 @@ class TnrcServiceClient {
 
         Status status = stub_->CommitCommandBuffer(&context, request, &response);
 
+        if (!status.ok()) {
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                      << std::endl;
+            return false;
+        }
+
         command_buffer->set_command_buffer_id(response.command_buffer_id());
 
         return true;
@@ -292,6 +298,12 @@ class TnrcServiceClient {
         request.mutable_buffer_ids()->Assign(buffer_ids.begin(), buffer_ids.end());
 
         Status status = stub_->WaitUntilCompleted(&context, request, &response);
+
+        if (!status.ok()) {
+            std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                      << std::endl;
+            return false;
+        }
 
         ComputeCommandEncoder *compute_command_encoder = command_buffer->get_compute_encoder();
 
@@ -357,15 +369,14 @@ ComputeCommandEncoder *CommandBuffer::computeCommandEncoder() {
     return compute_command_encoder_;
 }
 
-// TODO: Make RPC call.
 void CommandBuffer::commit() {
     bool b = Client().CommitCommandBuffer(this);
     assert(b);
 }
 
-// TODO: Block until we get response from RPC.
 void CommandBuffer::waitUntilCompleted() {
-    Client().WaitUnitlCompleted(this);
+    bool b = Client().WaitUnitlCompleted(this);
+    assert(b);
 }
 void CommandQueue::release() {
     if (Client().ReleaseCommandQueue(command_queue_id_)) {

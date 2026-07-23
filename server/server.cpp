@@ -246,6 +246,7 @@ class ShimmerImpl final : public TnrcService::Service {
         command_buffer->commit();
 
         counter_++;
+        command_buffer->retain();
         command_buffer_map_[counter_] = command_buffer;
 
         response->set_command_buffer_id(counter_);
