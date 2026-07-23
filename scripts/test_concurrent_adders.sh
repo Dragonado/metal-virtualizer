@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-readonly CLIENT_COUNT=10
+readonly CLIENT_COUNT=100
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"

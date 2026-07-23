@@ -91,6 +91,15 @@ policy is deferred.
       sections to ID/map bookkeeping only; do not hold it while waiting for the
       GPU. Consider per-map locks only after measuring contention, with a fixed
       lock order and safe object lifetimes after lookup.
+- [ ] Scheduler job lifetime: at enqueue, retain the real command queue,
+      pipeline state, and bound buffers in `PendingJob`. A client `release()`
+      removes its public handle, but the real object stays alive until every
+      queued or running job using it has completed.
+- [ ] Scheduler completion copyback: store output bytes with the completed job
+      instead of looking buffers up through global maps in
+      `WaitUntilCompleted()`. Copy results only into client shadow buffers that
+      are still live; a client that released its last buffer handle cannot
+      observe its output.
 - [ ] DEFERRED (stretch): fair-share / priority policy. Sub-kernel preemption is not exposed by the Metal API, do not attempt.
 
 ### VM test setup (optional)

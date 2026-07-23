@@ -246,6 +246,61 @@ thread cannot release a buffer just after commit finds its raw pointer. One
 mutex is the right first correctness tool; finer locks are an optimization once
 the scheduler is measured.
 
+### The 100-client experiment: the race happened
+
+It is tempting to look at a ten-client run that happens to pass and conclude
+that the mutex is unnecessary. To test that assumption, I commented out every
+`std::lock_guard<std::mutex> lock(mtx_)` in the server and changed the
+concurrent-adder script from ten clients to one hundred. The result was not a
+subtle benchmark regression. Three clients failed, and the logs caught the
+direct symptom:
+
+```text
+adder 17: Buffer ID: 903
+adder 92: Buffer ID: 903
+
+[SHIM] ERROR: 5: Could not find buffer.
+Assertion failed: (b), function commit, file metal_impl.cpp, line 374.
+```
+
+Two independent clients received the same supposedly unique buffer ID. The
+reason is that `counter_++` is not one indivisible action. Without a lock, two
+gRPC handler threads can interleave like this:
+
+```text
+thread A reads counter_ = 902
+thread B reads counter_ = 902
+thread A writes counter_ = 903 and returns ID 903
+thread B writes counter_ = 903 and returns ID 903
+```
+
+The same test also concurrently inserted into and searched `buffer_map_`.
+`std::map` does not allow a writer and another writer or reader to access it at
+the same time. That is a C++ data race and therefore undefined behavior: the
+map can be corrupted, a lookup can fail unexpectedly, or the process can
+crash. In this run, a later `CommitCommandBuffer` could not find a buffer. The
+server returned gRPC `NOT_FOUND`; the client correctly checked that status and
+aborted rather than continuing with an invalid response.
+
+gRPC is designed to let a server handle more than one RPC concurrently. In this
+synchronous server, gRPC can call methods on the one shared `ShimmerImpl`
+service object from different worker threads at the same time. It makes RPC
+dispatch concurrent; it does **not** make the service object's C++ members
+thread-safe. `counter_`, `buffer_map_`, and every other handle map belong to
+the service object, so the service code must provide their synchronization.
+
+That is the exact job of the lock guard:
+
+```cpp
+std::lock_guard<std::mutex> lock(mtx_);
+```
+
+It locks `mtx_` when the handler enters and reliably unlocks it when the handler
+returns, including an early error return. When every handler uses that same
+guard before touching shared state, only one handler can mutate or inspect the
+maps and counter at a time. The mutex does not make gRPC serial; it protects the
+server-owned state that concurrent gRPC handlers share.
+
 ## A correct global lock can erase the reason to have a scheduler
 
 The first ten-client test made this visible. The same ten 100-element vector
@@ -339,6 +394,12 @@ A five-second command buffer can still block every client behind it for five
 seconds. The scheduler controls which ready command buffer it submits next;
 Metal's driver retains final control over how submitted work executes on the
 hardware.
+
+This limitation is intended and acceptable. The scheduler chooses the next
+command buffer to submit; it does not and cannot pause one halfway through GPU
+work. A long submitted command buffer therefore still delays work behind it.
+The server controls admission order, while Metal's driver controls execution on
+the hardware.
 
 | Property | Thunder-style exclusive lease | Command-buffer multiplexing |
 | --- | --- | --- |
