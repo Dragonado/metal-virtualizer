@@ -85,6 +85,11 @@ policy is deferred.
 - [ ] Session isolation: separate handle tables, separate command streams, per-session copy-at-commit
 - [ ] Do NOT hold a global lock that serializes tenants across GPU submit (that would silently make it serial)
 - [ ] FIFO submission of committed command buffers across tenants (this IS the gap-fill mechanism, not a separate component)
+- [ ] Preserve commit order within each client's command stream. The scheduler
+      may interleave independent work from different clients, but it must never
+      submit one client's `A2` before that client's earlier `A1`; same-queue
+      Metal ordering is how valid GPU-to-GPU dependencies work without a CPU
+      `waitUntilCompleted()` between them.
 - [ ] Synchronize shared server handle tables and ID allocation before allowing
       concurrent RPC handlers to mutate them.
 - [ ] Start with one mutex for `counter_` and all handle maps. Keep its critical

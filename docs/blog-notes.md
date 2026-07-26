@@ -66,6 +66,167 @@ remoting API in miniature, where the GPU is the remote. Building GPU
 virtualization means inserting a network where Metal already drew the
 client/worker line.
 
+## GPU work often has no CPU-visible result
+
+Submitting GPU work does not imply that the CPU will read its output. The
+common vector-add demo does exactly that:
+
+```text
+GPU writes C -> CPU waits -> CPU reads C -> prints OK
+```
+
+Real GPU programs often form a GPU-only pipeline instead:
+
+```text
+GPU job A writes an intermediate buffer
+GPU job B reads that buffer
+GPU job C renders it to the display
+CPU never reads the intermediate bytes
+```
+
+A renderer writes pixels into a drawable that the display presents. A machine
+learning pipeline produces an intermediate tensor consumed by the next kernel.
+A temporary upload buffer is input only. In each case, a CPU round trip to read
+the bytes is pointless. The CPU can submit work, release temporary ownership,
+and prepare the next job while the GPU runs.
+
+That raises an important lifetime question. Suppose both A and B use the same
+buffer, and the application drops its own reference after it submits them:
+
+```text
+application owns buffer
+command buffer A retains buffer
+command buffer B retains buffer
+
+application releases buffer
+A finishes and releases its reference
+B runs, then releases its reference
+buffer is destroyed only after B finishes
+```
+
+This is reference counting, not the GPU somehow guessing that B will need the
+buffer. When the CPU encodes B and binds the buffer, B's command buffer records
+that dependency and retains the resource. Each normal Metal command buffer
+keeps strong references to the resources it needs by default. The application
+may release its own reference once every future command buffer that needs the
+resource has already taken a reference.
+
+The order matters. If the application releases its last reference after A but
+before it has encoded B, then B has no valid buffer pointer to bind. The buffer
+can be destroyed when A finishes. The API cannot preserve a future dependency
+that has not yet been expressed.
+
+This explains two remoter rules. First, a scheduled `PendingJob` must retain its
+server-side buffers, pipeline, and queue as soon as it enters the job queue.
+Second, the remote `waitUntilCompleted()` byte copyback is an emulation detail,
+not a property of native Metal. It is needed only when a client still owns a
+shadow buffer and wants to read it. GPU-only intermediate results can stay
+server-side for the next job.
+
+That last sentence is the desired end state, not what the current prototype
+implements. Today every `commit()` copies every bound client shadow buffer to
+the server. If A writes buffer X and B immediately uses X without a wait, the
+client's shadow copy of X is still old. B's commit uploads those old bytes and
+can overwrite A's server-side result before B runs. The current correct path
+for that dependency is therefore `A commit -> A wait/copyback -> B commit`.
+Keeping GPU-only intermediates server-side needs a coherence rule: upload a
+buffer only after the client has actually modified its shadow, not on every
+commit. Detecting such CPU writes requires explicit modification calls, dirty
+tracking, or a different server-authoritative buffer design.
+
+Apple documents the default retained-reference behavior for command buffers in
+[its Metal documentation](https://developer.apple.com/documentation/metal/mtlcommandbufferdescriptor/retainedreferences?changes=__1).
+
+## One queue is also an ordering contract
+
+GPU-only chaining works because command buffers committed to the same native
+Metal queue preserve their order. The CPU can express a dependency without
+waiting for A on the CPU:
+
+```cpp
+// A writes intermediate_buffer.
+command_buffer_a->commit();
+
+// B reads intermediate_buffer.
+command_buffer_b->commit();
+
+// No A->waitUntilCompleted() is needed here.
+```
+
+```text
+same command queue:
+  A commits: write X
+  B commits: read X
+
+  Metal executes A's commands before B can observe X
+```
+
+This is not an accidental implementation detail. It is the ordering contract
+that makes the pipeline correct. A scheduler must preserve it. It may insert
+client B's independent work between client A's two jobs, but it must never
+submit A2 before A1:
+
+```text
+valid:   A1 -> B1 -> A2
+invalid: A2 -> B1 -> A1
+```
+
+The latter can make A2 read data that A1 was supposed to write first. A single
+scheduler thread submitting to one real server queue gives this first version a
+simple ordering point. Different native Metal queues do not automatically order
+one another; cross-queue dependencies need explicit synchronization, such as a
+shared event. Apple describes same-queue command ordering in its
+[command-structure documentation](https://developer.apple.com/documentation/Metal/setting-up-a-command-structure)
+and [`commit()` documentation](https://developer.apple.com/documentation/metal/mtlcommandbuffer/commit%28%29?changes=__6&language=objc).
+
+## A command queue is an ordered asynchronous submission lane
+
+The queue is not the GPU, and it is not one GPU job. A command buffer is one
+job; a command queue is the ordered lane that accepts many jobs:
+
+```text
+one command queue Q
+  command buffer A1
+  command buffer A2
+  command buffer A3
+```
+
+That is why submission is `command_buffer->commit()`, not `queue->commit()`.
+The command buffer is saying, "submit this particular job to the queue that
+created me." A queue can have many unfinished command buffers, so
+`queue->commit()` would not say which job should be submitted.
+
+The important benefit is dependent asynchronous work. If A writes X and B reads
+X, the CPU can submit both to the same queue and continue doing unrelated work:
+
+```cpp
+command_buffer_a->commit(); // A writes X.
+command_buffer_b->commit(); // B reads X.
+
+// The CPU does not need A->waitUntilCompleted() here.
+```
+
+```text
+same queue:
+  A writes X -> B reads X
+  Metal preserves this order
+
+different queues:
+  A writes X -> B reads X
+  no automatic ordering; use an explicit event
+```
+
+The queue's core purpose is therefore an ordered asynchronous submission lane.
+It creates command buffers, gives them a common ordering scope, and hands their
+work to Metal for scheduling. It does not own a GPU, reserve GPU time, promise
+a dedicated resource slice, or make every calculation physically run one after
+another. It guarantees the observable command order; the driver and hardware
+can still pipeline internal execution.
+
+An API could have hidden one global queue and still support asynchronous GPU
+work. Metal exposes queues because applications often need separate ordered
+streams and explicit control over how their jobs enter the GPU.
+
 ## You cannot compile GPU code ahead of time
 
 Why is the Metal kernel compiled at runtime instead of bundled into the

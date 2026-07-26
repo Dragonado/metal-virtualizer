@@ -33,6 +33,11 @@ ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 // Logic and data behind the server's behavior.
 class ShimmerImpl final : public TnrcService::Service {
   public:
+    // Suppose there are two jobs (q1, c1) and (q2, c2). Where q = command queue and c = command buffer and c1 was commited before c2 by the client.
+    // Then the ONLY schedule ordering invariant the server must hold is: if q1 == q2 then c1 commits before c2.
+    void schedule(MTL::CommandBuffer *command_buffer, uint32_t command_buffer_id) {
+    }
+
     ShimmerImpl() {
         counter_ = 0;
     }

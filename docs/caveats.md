@@ -81,3 +81,25 @@ which to observe the result. The remoter may discard that buffer's returned
 bytes. The current client command buffer stores raw `Buffer*` values and
 dereferences them during `waitUntilCompleted()`, so it needs explicit lifetime
 handling before this release-before-wait case is supported.
+
+## The scheduler must preserve one client's command order
+
+Native Metal preserves the order of command buffers committed to the same
+`MTL::CommandQueue`. This makes a GPU-only dependency valid without a CPU wait:
+
+```text
+A commits: writes buffer X
+B commits: reads buffer X
+
+same queue => B observes A's write
+```
+
+The scheduler may choose how to interleave independent clients, but it must not
+submit a later job from one client before that client's earlier job. If client A
+commits `A1` and then `A2`, `A1` must be submitted before `A2`. Reversing them
+can change a valid Metal program's result.
+
+Different Metal queues have no such implicit dependency. Cross-queue work needs
+explicit synchronization, such as a shared event. For the first scheduler, one
+server submission queue and one scheduler thread are the simplest way to make
+the order deterministic.
