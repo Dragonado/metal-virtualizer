@@ -12,6 +12,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
@@ -30,16 +31,93 @@ using namespace tnrc;
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
+enum class JobState {
+    NOT_STARTED,
+    QUEUED,
+    RUNNING,
+    COMPLETED,
+    FAILED,
+};
+
+struct Job {
+    uint32_t command_buffer_id;
+    CommitCommandBufferRequest request;
+    MTL::CommandBuffer *command_buffer;
+    JobState state = JobState::NOT_STARTED;
+
+    Status failure_status;
+    std::condition_variable completed_cv;
+};
+
 // Logic and data behind the server's behavior.
 class ShimmerImpl final : public TnrcService::Service {
   public:
+    void update_job_status_after_completion(const std::shared_ptr<Job> job) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (job->command_buffer->status() == MTL::CommandBufferStatus::CommandBufferStatusCompleted) {
+            job->state = JobState::COMPLETED;
+        } else if (job->command_buffer->status() == MTL::CommandBufferStatus::CommandBufferStatusError) {
+            job->state = JobState::FAILED;
+        } else
+            assert(false);
+
+        completed_cv_.notify_all();
+    }
+
+    void commit_job(std::shared_ptr<Job> &job) {
+        CommitCommandBufferRequest &request = job->request;
+        mtx_.lock();
+        job->command_buffer = command_queue_map_[request.command_queue_id()]->commandBuffer();
+        MTL::ComputeCommandEncoder *compute_command_encoder = job->command_buffer->computeCommandEncoder();
+        compute_command_encoder->setComputePipelineState(compute_pipeline_state_map_[request.compute_pipeline_state_id()]);
+
+        assert(request.buffer_ids_size() == request.buffer_offsets_size());
+        assert(request.buffer_ids_size() == request.index_map_size());
+
+        size_t offset = 0;
+        for (size_t i = 0; i < request.buffer_ids().size(); i++) {
+            auto buffer_itr = buffer_map_.find(request.buffer_ids().Get(i));
+
+            assert(buffer_itr != buffer_map_.end());
+            memcpy(buffer_itr->second->contents(), request.all_buffer_data().data() + offset, buffer_itr->second->length());
+            compute_command_encoder->setBuffer(buffer_itr->second, request.buffer_offsets().Get(i), request.index_map().Get(i));
+            offset += buffer_itr->second->length();
+        }
+        mtx_.unlock();
+
+        compute_command_encoder->dispatchThreads(MTL::Size(request.grid_size(), 1, 1), MTL::Size(request.thread_group_size(), 1, 1));
+        compute_command_encoder->endEncoding();
+        job->command_buffer->addCompletedHandler([this, job](MTL::CommandBuffer *command_buffer) {
+            update_job_status_after_completion(job);
+        });
+        job->command_buffer->commit();
+        job->command_buffer->retain();
+    }
+
     // Suppose there are two jobs (q1, c1) and (q2, c2). Where q = command queue and c = command buffer and c1 was commited before c2 by the client.
     // Then the ONLY schedule ordering invariant the server must hold is: if q1 == q2 then c1 commits before c2.
-    void schedule(MTL::CommandBuffer *command_buffer, uint32_t command_buffer_id) {
+    void scheduler_loop() {
+        while (!is_server_shutdown) {
+            std::unique_lock<std::mutex> lock(mtx_);
+            scheduler_cv_.wait(lock, [&]() { return !ready_jobs_.empty(); });
+
+            // ENTER COMPLEX SCHEDULING LOGIC.
+            // CURRENT LOGIC: FIFO
+            auto job = *ready_jobs_.begin();
+            ready_jobs_.pop_front();
+
+            assert(job->state == JobState::QUEUED);
+            job->state = JobState::RUNNING;
+
+            lock.unlock();
+            commit_job(job);
+        }
     }
 
     ShimmerImpl() {
         counter_ = 0;
+        is_server_shutdown = false;
+        scheduler_thread_ = std::thread(&ShimmerImpl::scheduler_loop, this);
     }
 
     Status CreateSystemDefaultDeviceShim(ServerContext *context, const CreateSystemDefaultDeviceShimRequest *request, CreateSystemDefaultDeviceShimResponse *response) override {
@@ -218,7 +296,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CommitCommandBuffer(ServerContext *context, const CommitCommandBufferRequest *request, CommitCommandBufferResponse *response) override {
-        std::lock_guard<std::mutex> lock(mtx_);
+        mtx_.lock();
         auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
         if (command_queue_itr == command_queue_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find command queue.");
@@ -228,46 +306,33 @@ class ShimmerImpl final : public TnrcService::Service {
         if (compute_pipeline_state_itr == compute_pipeline_state_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find compute pipeline state.");
         }
+        mtx_.unlock();
 
-        MTL::CommandBuffer *command_buffer = command_queue_itr->second->commandBuffer();
-        MTL::ComputeCommandEncoder *compute_command_encoder = command_buffer->computeCommandEncoder();
-        compute_command_encoder->setComputePipelineState(compute_pipeline_state_itr->second);
-
-        assert(request->buffer_ids_size() == request->buffer_offsets_size());
-        assert(request->buffer_ids_size() == request->index_map_size());
-
-        size_t offset = 0;
-        for (size_t i = 0; i < request->buffer_ids().size(); i++) {
-            auto buffer_itr = buffer_map_.find(request->buffer_ids().Get(i));
-            if (buffer_itr == buffer_map_.end()) {
-                return Status(StatusCode::NOT_FOUND, "Could not find buffer.");
-            }
-
-            memcpy(buffer_itr->second->contents(), request->all_buffer_data().data() + offset, buffer_itr->second->length());
-            compute_command_encoder->setBuffer(buffer_itr->second, request->buffer_offsets().Get(i), request->index_map().Get(i));
-            offset += buffer_itr->second->length();
+        auto job = std::make_shared<Job>(); // allocate job on heap.
+        job->request = *request;
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            job->command_buffer_id = ++counter_;
+            job->state = JobState::QUEUED;
+            job_map_[job->command_buffer_id] = job;
+            ready_jobs_.push_back(job);
         }
+        response->set_command_buffer_id(job->command_buffer_id);
+        scheduler_cv_.notify_one();
 
-        compute_command_encoder->dispatchThreads(MTL::Size(request->grid_size(), 1, 1), MTL::Size(request->thread_group_size(), 1, 1));
-        compute_command_encoder->endEncoding();
-        command_buffer->commit();
-
-        counter_++;
-        command_buffer->retain();
-        command_buffer_map_[counter_] = command_buffer;
-
-        response->set_command_buffer_id(counter_);
         return Status::OK;
     }
 
     Status WaitUntilCompleted(ServerContext *context, const WaitUntilCompletedRequest *request, WaitUntilCompletedResponse *response) override {
-        std::lock_guard<std::mutex> lock(mtx_);
-        auto command_buffer_itr = command_buffer_map_.find(request->command_buffer_id());
-        if (command_buffer_itr == command_buffer_map_.end()) {
+        std::unique_lock<std::mutex> lock(mtx_);
+        auto job_itr = job_map_.find(request->command_buffer_id());
+
+        if (job_itr == job_map_.end()) {
             return Status(StatusCode::NOT_FOUND, "Could not find command buffer.");
         }
 
-        command_buffer_itr->second->waitUntilCompleted();
+        auto &job = job_itr->second;
+        completed_cv_.wait(lock, [&job]() { return job->state == JobState::COMPLETED || job->state == JobState::FAILED; });
 
         size_t total_size = 0;
         std::vector<MTL::Buffer *> buffers;
@@ -291,12 +356,15 @@ class ShimmerImpl final : public TnrcService::Service {
             offset += buffer->length();
         }
 
-        command_buffer_itr->second->release();
-        command_buffer_map_.erase(command_buffer_itr);
+        job_map_.erase(job_itr);
+        job->command_buffer->release();
         return Status::OK;
     }
 
     ~ShimmerImpl() {
+        is_server_shutdown = true;
+        scheduler_thread_.join();
+
         // Order is important.
         for (auto &[id, compute_pipeline_state] : compute_pipeline_state_map_) {
             if (compute_pipeline_state != nullptr)
@@ -325,15 +393,23 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
   private:
-    uint32_t counter_;
+    std::atomic<uint32_t> counter_;
     std::map<uint32_t, MTL::ComputePipelineState *> compute_pipeline_state_map_;
     std::map<uint32_t, MTL::Function *> function_map_;
     std::map<uint32_t, MTL::Library *> library_map_;
-    std::map<uint32_t, MTL::CommandBuffer *> command_buffer_map_;
     std::map<uint32_t, MTL::CommandQueue *> command_queue_map_;
     std::map<uint32_t, MTL::Buffer *> buffer_map_;
     std::map<uint32_t, MTL::Device *> device_map_;
+
     std::mutex mtx_;
+    std::condition_variable scheduler_cv_;
+    std::condition_variable completed_cv_;
+
+    std::deque<std::shared_ptr<Job>> ready_jobs_;
+    std::map<uint32_t, std::shared_ptr<Job>> job_map_;
+
+    std::thread scheduler_thread_;
+    std::atomic<bool> is_server_shutdown;
 };
 
 void RunServer(uint16_t port) {
