@@ -977,6 +977,39 @@ client source is unchanged; it just recompiles against my headers instead of
 Apple's metal-cpp. This sidesteps all runtime-interception machinery. The cost
 is a recompile, which is free for me because I write every client.
 
+This is still user-space GPU API remoting. "User space" means the application
+and ordinary libraries, as opposed to the operating-system kernel and its GPU
+driver. I do not modify macOS, the kernel, or the Metal driver. My shim catches
+the application's Metal operations in user space, sends them through gRPC, and
+lets the server call the real Metal framework and driver.
+
+The exact substitution point is compilation rather than linking. The forced
+header defines `MTL` as `MetalShim`, so preprocessing changes code such as
+`MTL::Device` into `MetalShim::Device`. The compiler therefore emits direct
+calls to my C++ proxy methods. There is no Apple Metal call in the client binary
+that the dynamic linker later redirects:
+
+```text
+my client:
+source -> shim header/preprocessor -> compile proxy calls -> gRPC -> server Metal
+
+Thunder-style CUDA client:
+source -> normal compile -> binary requests CUDA C symbols -> replacement libcuda -> network
+```
+
+The ABI is the compiled-binary contract: symbol names, argument placement,
+return-value placement, and data layout. A C ABI exposes ordinary named
+functions such as `cuMemAlloc` and `cuLaunchKernel`. A replacement shared
+library can export those same symbols, so an already-compiled CUDA program can
+be redirected at load time. Most Metal operations do not have one C symbol per
+method. They are Objective-C messages sent through the common `objc_msgSend`
+function, which is why the same clean linker substitution is unavailable.
+
+The precise description of this project is therefore: **user-space Metal API
+remoting through compile-time header substitution**. It preserves source-level
+usage for the supported subset, but it does not support arbitrary precompiled
+Metal binaries.
+
 The general principle worth remembering: transparent binary interposition is
 only as clean as the API boundary is a flat C symbol table. A C-ABI shared
 library is interposable by design. An Objective-C framework, or any header-only
@@ -1004,8 +1037,9 @@ equivalent because it swaps a loaded library under a byte-identical binary. I
 swap the binary itself via recompile. That is a real limitation and I should
 name it rather than paper over it.
 
-Why it is still not cheating. The substitution mechanism (compile-time link vs
-load-time preload) is a small part of the system and not the interesting part.
+Why it is still not cheating. The substitution mechanism (compile-time header
+substitution vs load-time preload) is a small part of the system and not the
+interesting part.
 The transport, the copy-at-commit coherence shim, the scheduler, the multi-tenant
 utilization work are identical either way. The shim genuinely proxies every call
 over the wire, genuinely snapshots buffers at commit, genuinely multiplexes two
@@ -1029,7 +1063,7 @@ standard seam.
 Where the critique becomes valid: the moment the write-up claims the wrong
 thing. "Transparent Metal GPU virtualization" would oversell, because it is not
 transparent to prebuilt binaries. The honest and more interesting claim is
-"Metal GPU remoting via a link-time shim; full binary transparency would require
+"Metal GPU remoting via a compile-time header shim; full binary transparency would require
 ObjC-runtime interception, which I scoped out, and here is the CUDA-vs-Metal ABI
 reason why." That framing is more rigorous and it foregrounds the actual insight
 (C symbol table vs objc_msgSend). So: a deliberate scope cut on an axis (artifact
