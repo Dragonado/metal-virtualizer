@@ -376,7 +376,14 @@ void CommandBuffer::commit() {
 
 void CommandBuffer::waitUntilCompleted() {
     bool b = Client().WaitUnitlCompleted(this);
-    assert(b);
+
+    // ideally this function should not destroy anything.
+    // we should be autorelease the compute encoder and command buffer but I cant be bothered with that as of now.
+    // Since im enforcing 1 commit and 1 waitUntilCompleted this will work fine.
+    if (b) {
+        delete this->compute_command_encoder_;
+        delete this;
+    }
 }
 void CommandQueue::release() {
     if (Client().ReleaseCommandQueue(command_queue_id_)) {

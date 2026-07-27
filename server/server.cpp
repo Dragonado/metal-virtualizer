@@ -61,7 +61,7 @@ class ShimmerImpl final : public TnrcService::Service {
         } else
             assert(false);
 
-        completed_cv_.notify_all();
+        job->completed_cv.notify_one();
     }
 
     void commit_job(std::shared_ptr<Job> &job) {
@@ -90,16 +90,19 @@ class ShimmerImpl final : public TnrcService::Service {
         job->command_buffer->addCompletedHandler([this, job](MTL::CommandBuffer *command_buffer) {
             update_job_status_after_completion(job);
         });
-        job->command_buffer->commit();
         job->command_buffer->retain();
+        job->command_buffer->commit();
     }
 
     // Suppose there are two jobs (q1, c1) and (q2, c2). Where q = command queue and c = command buffer and c1 was commited before c2 by the client.
     // Then the ONLY schedule ordering invariant the server must hold is: if q1 == q2 then c1 commits before c2.
     void scheduler_loop() {
-        while (!is_server_shutdown) {
+        while (true) {
             std::unique_lock<std::mutex> lock(mtx_);
-            scheduler_cv_.wait(lock, [&]() { return !ready_jobs_.empty(); });
+            scheduler_cv_.wait(lock, [&]() { return is_server_shutdown || !ready_jobs_.empty(); });
+
+            if (is_server_shutdown)
+                break;
 
             // ENTER COMPLEX SCHEDULING LOGIC.
             // CURRENT LOGIC: FIFO
@@ -299,11 +302,13 @@ class ShimmerImpl final : public TnrcService::Service {
         mtx_.lock();
         auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
         if (command_queue_itr == command_queue_map_.end()) {
+            mtx_.unlock();
             return Status(StatusCode::NOT_FOUND, "Could not find command queue.");
         }
 
         auto compute_pipeline_state_itr = compute_pipeline_state_map_.find(request->compute_pipeline_state_id());
         if (compute_pipeline_state_itr == compute_pipeline_state_map_.end()) {
+            mtx_.unlock();
             return Status(StatusCode::NOT_FOUND, "Could not find compute pipeline state.");
         }
         mtx_.unlock();
@@ -331,8 +336,8 @@ class ShimmerImpl final : public TnrcService::Service {
             return Status(StatusCode::NOT_FOUND, "Could not find command buffer.");
         }
 
-        auto &job = job_itr->second;
-        completed_cv_.wait(lock, [&job]() { return job->state == JobState::COMPLETED || job->state == JobState::FAILED; });
+        auto job = job_itr->second;
+        job->completed_cv.wait(lock, [&job]() { return job->state == JobState::COMPLETED || job->state == JobState::FAILED; });
 
         size_t total_size = 0;
         std::vector<MTL::Buffer *> buffers;
@@ -358,11 +363,16 @@ class ShimmerImpl final : public TnrcService::Service {
 
         job_map_.erase(job_itr);
         job->command_buffer->release();
+
         return Status::OK;
     }
 
     ~ShimmerImpl() {
+        mtx_.lock();
         is_server_shutdown = true;
+        mtx_.unlock();
+
+        scheduler_cv_.notify_one();
         scheduler_thread_.join();
 
         // Order is important.
@@ -403,13 +413,12 @@ class ShimmerImpl final : public TnrcService::Service {
 
     std::mutex mtx_;
     std::condition_variable scheduler_cv_;
-    std::condition_variable completed_cv_;
 
     std::deque<std::shared_ptr<Job>> ready_jobs_;
     std::map<uint32_t, std::shared_ptr<Job>> job_map_;
 
     std::thread scheduler_thread_;
-    std::atomic<bool> is_server_shutdown;
+    bool is_server_shutdown;
 };
 
 void RunServer(uint16_t port) {

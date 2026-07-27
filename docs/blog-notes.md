@@ -407,6 +407,116 @@ thread cannot release a buffer just after commit finds its raw pointer. One
 mutex is the right first correctness tool; finer locks are an optimization once
 the scheduler is measured.
 
+### A condition-variable notification is not stored
+
+A shutdown flag and a condition variable must follow the same mutex agreement.
+Making the flag atomic prevents a data race on the flag itself, but it does not
+prevent a lost wakeup. This interleaving is possible if the destructor changes
+the predicate without taking the mutex used by the waiting thread:
+
+```text
+scheduler:
+  holds mtx_
+  checks is_server_shutdown
+  sees false
+
+destructor:
+  sets is_server_shutdown = true
+  calls notify_one()
+  nobody is sleeping yet, so notification disappears
+
+scheduler:
+  starts sleeping
+  no future notification arrives
+  sleeps forever
+```
+
+The scheduler checks the predicate again after it wakes, but it missed the only
+notification and therefore never gets that chance. A condition variable is a
+doorbell, not a mailbox: ringing it does not leave a token for a future waiter.
+
+The fix is to change the predicate while holding the same mutex, then notify:
+
+```cpp
+{
+    std::lock_guard<std::mutex> lock(mtx_);
+    is_server_shutdown = true;
+}
+scheduler_cv_.notify_one();
+```
+
+If the scheduler owns `mtx_`, the destructor must wait. The scheduler then
+atomically releases the mutex and begins waiting, after which the destructor
+can set the flag and wake it. If the destructor gets the mutex first, the
+scheduler later sees `true` and never sleeps. Those are the only two possible
+orders, so the wakeup cannot fall into the gap between checking and sleeping.
+
+### Reference counting: atomicity and memory ordering are different promises
+
+A portable C++ proxy can copy Metal's `retain()`/`release()` ownership model by
+keeping an atomic counter inside the object:
+
+```cpp
+class RefCounted {
+  public:
+    void retain() {
+        reference_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void release() {
+        if (reference_count_.fetch_sub(
+                1, std::memory_order_acq_rel) == 1) {
+            delete this;
+        }
+    }
+
+  protected:
+    virtual ~RefCounted() = default;
+
+  private:
+    std::atomic<uint32_t> reference_count_{1};
+};
+```
+
+The object begins with one owner. `retain()` adds an owner. `release()` removes
+one, and `fetch_sub()` returns the old value, so an old value of one means this
+thread changed the count to zero and is the only thread allowed to delete the
+object.
+
+Declaring the counter atomic is not enough if the update is written as a
+separate load and store. Two threads can both load one and both store two,
+losing an owner. `fetch_add`, `fetch_sub`, and the atomic `++`/`--` operators are
+single read-modify-write operations, so no increment or decrement is lost.
+
+Atomicity answers whether the counter update can be torn or lost. Memory
+ordering answers how the counter operation constrains reads and writes to other
+memory. Atomic `++reference_count_` and `--reference_count_` use the strongest
+default ordering, `memory_order_seq_cst`. All sequentially consistent atomic
+operations participate in one global order observed by every thread. This is
+simple and correct, but stronger than reference-count increments normally need.
+
+`retain()` only needs to add another owner to an object for which the caller
+already has a valid reference. It does not use that increment to publish the
+object's other fields to a new thread, so `fetch_add(1,
+memory_order_relaxed)` keeps the counter operation atomic without imposing
+additional ordering on unrelated memory.
+
+`release()` is different. An owner may modify the object before dropping its
+reference, and the thread removing the final reference is about to run the
+destructor. `memory_order_acq_rel` keeps earlier operations before the release
+and lets the final owner acquire the effects published by prior owners before
+destroying the object. The simpler `--reference_count_ == 0` version is also
+correct; it uses stronger sequentially consistent ordering and is a reasonable
+first implementation when clarity matters more than this small optimization.
+
+This C++ counter cannot simply inherit Foundation's autorelease behavior.
+metal-cpp's `NS::Referencing` assumes that `this` is a real Objective-C object
+and forwards `retain`, `release`, and `autorelease` through `objc_msgSend`. A
+plain C++ proxy allocated with `new` has no Objective-C `isa` pointer, and
+sending it those messages can crash. A portable Linux client therefore needs
+its own C++ reference counting and, if exact `commandBuffer()` naming semantics
+are required, its own lightweight autorelease-pool mechanism.
+
 ### The 100-client experiment: the race happened
 
 It is tempting to look at a ten-client run that happens to pass and conclude

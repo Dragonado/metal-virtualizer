@@ -173,5 +173,6 @@ int main() {
 
     adder->verify();
 
+    delete adder;
     return 0;
 }
