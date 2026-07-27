@@ -3,6 +3,7 @@ package tnrc;
 
 service TnrcService {
   rpc CreateSystemDefaultDeviceShim(CreateSystemDefaultDeviceShimRequest) returns (CreateSystemDefaultDeviceShimResponse);
+  rpc ReleaseDeviceShim(ReleaseDeviceShimRequest) returns (ReleaseDeviceShimResponse);
   rpc CreateCommandQueueShim(CreateCommandQueueShimRequest) returns (CreateCommandQueueShimResponse);
   rpc ReleaseCommandQueueShim(ReleaseCommandQueueShimRequest) returns (ReleaseCommandQueueShimResponse);
   rpc CreateLibraryShim(CreateLibraryShimRequest) returns (CreateLibraryShimResponse);
@@ -23,6 +24,12 @@ message CreateSystemDefaultDeviceShimResponse {
   uint32 device_id = 1;
   string device_name = 2;
 }
+
+message ReleaseDeviceShimRequest {
+  uint32 device_id = 1;
+}
+
+message ReleaseDeviceShimResponse {}
 
 message CreateCommandQueueShimRequest {
   uint32 device_id = 1;

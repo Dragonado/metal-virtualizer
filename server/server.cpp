@@ -31,6 +31,18 @@ using namespace tnrc;
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
+class ScopedAutoreleasePool {
+  public:
+    ScopedAutoreleasePool() : pool_(NS::AutoreleasePool::alloc()->init()) {}
+
+    ~ScopedAutoreleasePool() {
+        pool_->release();
+    }
+
+  private:
+    NS::AutoreleasePool *pool_;
+};
+
 enum class JobState {
     NOT_STARTED,
     QUEUED,
@@ -42,7 +54,7 @@ enum class JobState {
 struct Job {
     uint32_t command_buffer_id;
     CommitCommandBufferRequest request;
-    MTL::CommandBuffer *command_buffer;
+    MTL::CommandBuffer *command_buffer = nullptr;
     JobState state = JobState::NOT_STARTED;
 
     Status failure_status;
@@ -61,10 +73,13 @@ class ShimmerImpl final : public TnrcService::Service {
         } else
             assert(false);
 
+        job->command_buffer->release();
+        job->command_buffer = nullptr;
         job->completed_cv.notify_one();
     }
 
     void commit_job(std::shared_ptr<Job> &job) {
+        ScopedAutoreleasePool autorelease_pool;
         CommitCommandBufferRequest &request = job->request;
         mtx_.lock();
         job->command_buffer = command_queue_map_[request.command_queue_id()]->commandBuffer();
@@ -124,6 +139,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateSystemDefaultDeviceShim(ServerContext *context, const CreateSystemDefaultDeviceShimRequest *request, CreateSystemDefaultDeviceShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         MTL::Device *device;
         device = MTL::CreateSystemDefaultDevice();
@@ -139,7 +155,21 @@ class ShimmerImpl final : public TnrcService::Service {
         return Status::OK;
     }
 
+    Status ReleaseDeviceShim(ServerContext *context, const ReleaseDeviceShimRequest *request, ReleaseDeviceShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
+        std::lock_guard<std::mutex> lock(mtx_);
+        auto device_itr = device_map_.find(request->device_id());
+        if (device_itr == device_map_.end()) {
+            return Status(StatusCode::NOT_FOUND, "Could not find device.");
+        }
+
+        device_itr->second->release();
+        device_map_.erase(device_itr);
+        return Status::OK;
+    }
+
     Status CreateCommandQueueShim(ServerContext *context, const CreateCommandQueueShimRequest *request, CreateCommandQueueShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
@@ -158,6 +188,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseCommandQueueShim(ServerContext *context, const ReleaseCommandQueueShimRequest *request, ReleaseCommandQueueShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
         if (command_queue_itr == command_queue_map_.end()) {
@@ -170,6 +201,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateLibraryShim(ServerContext *context, const CreateLibraryShimRequest *request, CreateLibraryShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
@@ -190,6 +222,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseLibraryShim(ServerContext *context, const ReleaseLibraryShimRequest *request, ReleaseLibraryShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto library_itr = library_map_.find(request->library_id());
         if (library_itr == library_map_.end()) {
@@ -202,6 +235,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateFunctionShim(ServerContext *context, const CreateFunctionShimRequest *request, CreateFunctionShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto library_itr = library_map_.find(request->library_id());
         if (library_itr == library_map_.end()) {
@@ -220,6 +254,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseFunctionShim(ServerContext *context, const ReleaseFunctionShimRequest *request, ReleaseFunctionShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto function_itr = function_map_.find(request->function_id());
         if (function_itr == function_map_.end()) {
@@ -232,6 +267,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateComputePipelineStateShim(ServerContext *context, const CreateComputePipelineStateShimRequest *request, CreateComputePipelineStateShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
@@ -258,6 +294,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseComputePipelineStateShim(ServerContext *context, const ReleaseComputePipelineStateShimRequest *request, ReleaseComputePipelineStateShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto compute_pipeline_state_itr = compute_pipeline_state_map_.find(request->compute_pipeline_state_id());
         if (compute_pipeline_state_itr == compute_pipeline_state_map_.end()) {
@@ -270,6 +307,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CreateBufferShim(ServerContext *context, const CreateBufferShimRequest *request, CreateBufferShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto device_itr = device_map_.find(request->device_id());
         if (device_itr == device_map_.end()) {
@@ -287,6 +325,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status ReleaseBufferShim(ServerContext *context, const ReleaseBufferShimRequest *request, ReleaseBufferShimResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::lock_guard<std::mutex> lock(mtx_);
         auto buffer_itr = buffer_map_.find(request->buffer_id());
         if (buffer_itr == buffer_map_.end()) {
@@ -299,6 +338,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status CommitCommandBuffer(ServerContext *context, const CommitCommandBufferRequest *request, CommitCommandBufferResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         mtx_.lock();
         auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
         if (command_queue_itr == command_queue_map_.end()) {
@@ -329,6 +369,7 @@ class ShimmerImpl final : public TnrcService::Service {
     }
 
     Status WaitUntilCompleted(ServerContext *context, const WaitUntilCompletedRequest *request, WaitUntilCompletedResponse *response) override {
+        ScopedAutoreleasePool autorelease_pool;
         std::unique_lock<std::mutex> lock(mtx_);
         auto job_itr = job_map_.find(request->command_buffer_id());
 
@@ -346,6 +387,7 @@ class ShimmerImpl final : public TnrcService::Service {
             auto buffer_itr = buffer_map_.find(request->buffer_ids(i));
 
             if (buffer_itr == buffer_map_.end()) {
+                job_map_.erase(job_itr);
                 return Status(StatusCode::NOT_FOUND, "Could not find buffer.");
             }
 
@@ -362,7 +404,6 @@ class ShimmerImpl final : public TnrcService::Service {
         }
 
         job_map_.erase(job_itr);
-        job->command_buffer->release();
 
         return Status::OK;
     }
