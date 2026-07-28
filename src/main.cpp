@@ -21,11 +21,11 @@ class Adder {
 
         queue_ = device_->newCommandQueue();
 
-        NS::Error *err;
+        NS::Error *err = nullptr;
 
         // Metal code is added at run time. Under `bazel run` the cwd is the
-        // runfiles root, so the shader sits at metal/add.metal; fall back to
-        // the bare name when running from inside metal/ directly.
+        // runfiles root, so the shader sits at src/add.metal; fall back to
+        // the bare name when running from inside src/ directly.
         std::ifstream f("src/add.metal");
         if (!f.is_open()) {
             f.open("add.metal");
@@ -39,8 +39,11 @@ class Adder {
             NS::String::string(src.c_str(), NS::UTF8StringEncoding), nullptr, &err);
 
         if (library == NULL) {
-            std::cerr << "ERROR: library compile failed: "
-                      << err->localizedDescription()->utf8String() << '\n';
+            std::cerr << "ERROR: library compile failed";
+            if (err != nullptr) {
+                std::cerr << ": " << err->localizedDescription()->utf8String();
+            }
+            std::cerr << '\n';
             exit(1);
         }
 
@@ -54,8 +57,11 @@ class Adder {
         add_pso_ = device_->newComputePipelineState(add_func, &err);
 
         if (add_pso_ == NULL) {
-            std::cerr << "ERROR: Failed to create pipeline state object: "
-                      << err->localizedDescription()->utf8String() << '\n';
+            std::cerr << "ERROR: Failed to create pipeline state object";
+            if (err != nullptr) {
+                std::cerr << ": " << err->localizedDescription()->utf8String();
+            }
+            std::cerr << '\n';
             exit(1);
         }
 
@@ -164,11 +170,20 @@ int main() {
     NS::AutoreleasePool *autorelease_pool = NS::AutoreleasePool::alloc()->init();
 
     MTL::Device *device = MTL::CreateSystemDefaultDevice();
+    if (device == nullptr) {
+        std::cerr << "ERROR: Could not create Metal device." << std::endl;
+        autorelease_pool->release();
+        return 1;
+    }
     std::cout << "Name = " << device->name()->cString(NS::UTF8StringEncoding) << std::endl;
-    assert(device != nullptr);
 
     Adder *adder = Adder::create(device);
-    assert(adder != nullptr);
+    if (adder == nullptr) {
+        std::cerr << "ERROR: Could not create adder." << std::endl;
+        device->release();
+        autorelease_pool->release();
+        return 1;
+    }
     adder->prepareData();
     adder->sendComputeCommand();
 

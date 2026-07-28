@@ -18,8 +18,8 @@
 #include "absl/flags/parse.h"
 #include "absl/log/initialize.h"
 #include "absl/strings/str_format.h"
-#include "proto/tnrc.grpc.pb.h"
-#include "proto/tnrc.pb.h"
+#include "proto/metal_remote.grpc.pb.h"
+#include "proto/metal_remote.pb.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -27,7 +27,7 @@ using grpc::ServerContext;
 using grpc::Status;
 using grpc::StatusCode;
 
-using namespace tnrc;
+using namespace metal_remote;
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -62,43 +62,97 @@ struct Job {
 };
 
 // Logic and data behind the server's behavior.
-class ShimmerImpl final : public TnrcService::Service {
+class ShimmerImpl final : public MetalRemoteService::Service {
   public:
+    void fail_job_locked(const std::shared_ptr<Job> &job, StatusCode code,
+                         const std::string &message) {
+        job->state = JobState::FAILED;
+        job->failure_status = Status(code, message);
+        job->completed_cv.notify_all();
+    }
+
     void update_job_status_after_completion(const std::shared_ptr<Job> job) {
         std::lock_guard<std::mutex> lock(mtx_);
         if (job->command_buffer->status() == MTL::CommandBufferStatus::CommandBufferStatusCompleted) {
             job->state = JobState::COMPLETED;
-        } else if (job->command_buffer->status() == MTL::CommandBufferStatus::CommandBufferStatusError) {
+        } else {
             job->state = JobState::FAILED;
-        } else
-            assert(false);
+            job->failure_status = Status(StatusCode::INTERNAL, "Metal command buffer failed.");
+        }
 
         job->command_buffer->release();
         job->command_buffer = nullptr;
-        job->completed_cv.notify_one();
+        job->completed_cv.notify_all();
     }
 
     void commit_job(std::shared_ptr<Job> &job) {
         ScopedAutoreleasePool autorelease_pool;
         CommitCommandBufferRequest &request = job->request;
-        mtx_.lock();
-        job->command_buffer = command_queue_map_[request.command_queue_id()]->commandBuffer();
-        MTL::ComputeCommandEncoder *compute_command_encoder = job->command_buffer->computeCommandEncoder();
-        compute_command_encoder->setComputePipelineState(compute_pipeline_state_map_[request.compute_pipeline_state_id()]);
+        std::unique_lock<std::mutex> lock(mtx_);
 
-        assert(request.buffer_ids_size() == request.buffer_offsets_size());
-        assert(request.buffer_ids_size() == request.index_map_size());
+        auto command_queue_itr = command_queue_map_.find(request.command_queue_id());
+        if (command_queue_itr == command_queue_map_.end()) {
+            fail_job_locked(job, StatusCode::NOT_FOUND, "Command queue was released before submission.");
+            return;
+        }
+
+        auto compute_pipeline_state_itr =
+            compute_pipeline_state_map_.find(request.compute_pipeline_state_id());
+        if (compute_pipeline_state_itr == compute_pipeline_state_map_.end()) {
+            fail_job_locked(job, StatusCode::NOT_FOUND,
+                            "Compute pipeline state was released before submission.");
+            return;
+        }
+
+        job->command_buffer = command_queue_itr->second->commandBuffer();
+        if (job->command_buffer == nullptr) {
+            fail_job_locked(job, StatusCode::INTERNAL,
+                            "Metal failed to create a command buffer.");
+            return;
+        }
+
+        MTL::ComputeCommandEncoder *compute_command_encoder = job->command_buffer->computeCommandEncoder();
+        if (compute_command_encoder == nullptr) {
+            job->command_buffer = nullptr;
+            fail_job_locked(job, StatusCode::INTERNAL,
+                            "Metal failed to create a compute command encoder.");
+            return;
+        }
+        compute_command_encoder->setComputePipelineState(compute_pipeline_state_itr->second);
 
         size_t offset = 0;
         for (size_t i = 0; i < request.buffer_ids().size(); i++) {
             auto buffer_itr = buffer_map_.find(request.buffer_ids().Get(i));
 
-            assert(buffer_itr != buffer_map_.end());
+            if (buffer_itr == buffer_map_.end()) {
+                job->command_buffer = nullptr;
+                fail_job_locked(job, StatusCode::NOT_FOUND,
+                                "Buffer was released before submission.");
+                return;
+            }
+
+            size_t buffer_length = buffer_itr->second->length();
+            if (offset > request.all_buffer_data().size() ||
+                buffer_length > request.all_buffer_data().size() - offset) {
+                job->command_buffer = nullptr;
+                fail_job_locked(job, StatusCode::INVALID_ARGUMENT,
+                                "Command buffer payload is shorter than its buffer metadata.");
+                return;
+            }
+
             memcpy(buffer_itr->second->contents(), request.all_buffer_data().data() + offset, buffer_itr->second->length());
             compute_command_encoder->setBuffer(buffer_itr->second, request.buffer_offsets().Get(i), request.index_map().Get(i));
-            offset += buffer_itr->second->length();
+            offset += buffer_length;
         }
-        mtx_.unlock();
+
+        if (offset != request.all_buffer_data().size()) {
+            job->command_buffer = nullptr;
+            fail_job_locked(job, StatusCode::INVALID_ARGUMENT,
+                            "Command buffer payload contains extra bytes.");
+            return;
+        }
+
+        lock.unlock();
 
         compute_command_encoder->dispatchThreads(MTL::Size(request.grid_size(), 1, 1), MTL::Size(request.thread_group_size(), 1, 1));
         compute_command_encoder->endEncoding();
@@ -124,7 +178,11 @@ class ShimmerImpl final : public TnrcService::Service {
             auto job = *ready_jobs_.begin();
             ready_jobs_.pop_front();
 
-            assert(job->state == JobState::QUEUED);
+            if (job->state != JobState::QUEUED) {
+                fail_job_locked(job, StatusCode::INTERNAL,
+                                "Scheduler received a job in an invalid state.");
+                continue;
+            }
             job->state = JobState::RUNNING;
 
             lock.unlock();
@@ -208,12 +266,17 @@ class ShimmerImpl final : public TnrcService::Service {
             return Status(StatusCode::NOT_FOUND, "Could not find device.");
         }
 
-        NS::Error *err;
+        NS::Error *err = nullptr;
 
         MTL::Library *library = device_itr->second->newLibrary(
             NS::String::string(request->source().c_str(), NS::UTF8StringEncoding), nullptr, &err);
         if (library == nullptr) {
-            return Status(StatusCode::INTERNAL, "Could not create library");
+            std::string message = "Could not create library.";
+            if (err != nullptr && err->localizedDescription() != nullptr) {
+                message += " ";
+                message += err->localizedDescription()->utf8String();
+            }
+            return Status(StatusCode::INTERNAL, message);
         }
         counter_++;
         library_map_[counter_] = library;
@@ -279,11 +342,16 @@ class ShimmerImpl final : public TnrcService::Service {
             return Status(StatusCode::NOT_FOUND, "Could not find function.");
         }
 
-        NS::Error *err;
+        NS::Error *err = nullptr;
         MTL::ComputePipelineState *compute_pipeline_state = device_itr->second->newComputePipelineState(
             function_itr->second, &err);
         if (compute_pipeline_state == nullptr) {
-            return Status(StatusCode::INTERNAL, "Could not create compute_pipeline_state");
+            std::string message = "Could not create compute pipeline state.";
+            if (err != nullptr && err->localizedDescription() != nullptr) {
+                message += " ";
+                message += err->localizedDescription()->utf8String();
+            }
+            return Status(StatusCode::INTERNAL, message);
         }
         counter_++;
         compute_pipeline_state_map_[counter_] = compute_pipeline_state;
@@ -339,30 +407,62 @@ class ShimmerImpl final : public TnrcService::Service {
 
     Status CommitCommandBuffer(ServerContext *context, const CommitCommandBufferRequest *request, CommitCommandBufferResponse *response) override {
         ScopedAutoreleasePool autorelease_pool;
-        mtx_.lock();
+        std::unique_lock<std::mutex> lock(mtx_);
+
+        if (request->buffer_ids_size() != request->buffer_offsets_size() ||
+            request->buffer_ids_size() != request->index_map_size()) {
+            return Status(StatusCode::INVALID_ARGUMENT,
+                          "Buffer IDs, offsets, and indices must have equal lengths.");
+        }
+
+        if (request->grid_size() <= 0 || request->thread_group_size() <= 0) {
+            return Status(StatusCode::INVALID_ARGUMENT,
+                          "Grid and thread-group sizes must be positive.");
+        }
+
         auto command_queue_itr = command_queue_map_.find(request->command_queue_id());
         if (command_queue_itr == command_queue_map_.end()) {
-            mtx_.unlock();
             return Status(StatusCode::NOT_FOUND, "Could not find command queue.");
         }
 
         auto compute_pipeline_state_itr = compute_pipeline_state_map_.find(request->compute_pipeline_state_id());
         if (compute_pipeline_state_itr == compute_pipeline_state_map_.end()) {
-            mtx_.unlock();
             return Status(StatusCode::NOT_FOUND, "Could not find compute pipeline state.");
         }
-        mtx_.unlock();
 
+        size_t expected_payload_size = 0;
+        for (int i = 0; i < request->buffer_ids_size(); ++i) {
+            auto buffer_itr = buffer_map_.find(request->buffer_ids(i));
+            if (buffer_itr == buffer_map_.end()) {
+                return Status(StatusCode::NOT_FOUND, "Could not find buffer.");
+            }
+
+            size_t buffer_length = buffer_itr->second->length();
+            if (expected_payload_size > request->all_buffer_data().size() ||
+                request->buffer_offsets(i) > buffer_length ||
+                buffer_length > request->all_buffer_data().size() - expected_payload_size) {
+                return Status(StatusCode::INVALID_ARGUMENT,
+                              "Invalid buffer offset or packed buffer-data size.");
+            }
+            expected_payload_size += buffer_length;
+        }
+
+        if (expected_payload_size != request->all_buffer_data().size()) {
+            return Status(StatusCode::INVALID_ARGUMENT,
+                          "Packed buffer data contains extra bytes.");
+        }
+
+        lock.unlock();
         auto job = std::make_shared<Job>(); // allocate job on heap.
         job->request = *request;
-        {
-            std::lock_guard<std::mutex> lock(mtx_);
-            job->command_buffer_id = ++counter_;
-            job->state = JobState::QUEUED;
-            job_map_[job->command_buffer_id] = job;
-            ready_jobs_.push_back(job);
-        }
+
+        lock.lock();
+        job->command_buffer_id = ++counter_;
+        job->state = JobState::QUEUED;
+        job_map_[job->command_buffer_id] = job;
+        ready_jobs_.push_back(job);
         response->set_command_buffer_id(job->command_buffer_id);
+        lock.unlock();
         scheduler_cv_.notify_one();
 
         return Status::OK;
@@ -380,10 +480,28 @@ class ShimmerImpl final : public TnrcService::Service {
         auto job = job_itr->second;
         job->completed_cv.wait(lock, [&job]() { return job->state == JobState::COMPLETED || job->state == JobState::FAILED; });
 
+        if (job->state == JobState::FAILED) {
+            Status failure_status = job->failure_status;
+            job_map_.erase(job_itr);
+            return failure_status;
+        }
+
+        if (request->buffer_ids_size() != job->request.buffer_ids_size()) {
+            job_map_.erase(job_itr);
+            return Status(StatusCode::INVALID_ARGUMENT,
+                          "Wait request buffers do not match the committed command buffer.");
+        }
+
         size_t total_size = 0;
         std::vector<MTL::Buffer *> buffers;
 
         for (int i = 0; i < request->buffer_ids_size(); ++i) {
+            if (request->buffer_ids(i) != job->request.buffer_ids(i)) {
+                job_map_.erase(job_itr);
+                return Status(StatusCode::INVALID_ARGUMENT,
+                              "Wait request buffers do not match the committed command buffer.");
+            }
+
             auto buffer_itr = buffer_map_.find(request->buffer_ids(i));
 
             if (buffer_itr == buffer_map_.end()) {
@@ -395,15 +513,22 @@ class ShimmerImpl final : public TnrcService::Service {
             buffers.push_back(buffer);
             total_size += buffer->length();
         }
+
+        for (MTL::Buffer *buffer : buffers) {
+            buffer->retain();
+        }
+
+        job_map_.erase(job_itr);
+        lock.unlock();
+
         response->mutable_all_buffer_data()->resize(total_size);
 
         size_t offset = 0;
         for (MTL::Buffer *buffer : buffers) {
             memcpy(response->mutable_all_buffer_data()->data() + offset, buffer->contents(), buffer->length());
             offset += buffer->length();
+            buffer->release();
         }
-
-        job_map_.erase(job_itr);
 
         return Status::OK;
     }

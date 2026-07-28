@@ -1,6 +1,7 @@
 #include <Foundation/Foundation.hpp>
 #include <Metal/Metal.hpp>
 
+#include <cstdlib>
 #include <grpcpp/grpcpp.h>
 #include <iostream>
 #include <memory>
@@ -9,22 +10,22 @@
 
 #include "metal_shim.h"
 
-#include "proto/tnrc.grpc.pb.h"
-#include "proto/tnrc.pb.h"
+#include "proto/metal_remote.grpc.pb.h"
+#include "proto/metal_remote.pb.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 
-using namespace tnrc;
+using namespace metal_remote;
 
 namespace MetalShim {
 
 namespace {
-class TnrcServiceClient {
+class MetalRemoteClient {
   public:
-    TnrcServiceClient(std::shared_ptr<Channel> channel)
-        : stub_(TnrcService::NewStub(channel)) {}
+    MetalRemoteClient(std::shared_ptr<Channel> channel)
+        : stub_(MetalRemoteService::NewStub(channel)) {}
 
     Device *CreateDevice() {
         CreateSystemDefaultDeviceShimRequest request;
@@ -101,6 +102,10 @@ class TnrcServiceClient {
         CreateLibraryShimResponse response;
         ClientContext context;
 
+        if (error != nullptr) {
+            *error = nullptr;
+        }
+
         request.set_device_id(device_id);
         request.set_source(source->cString(NS::UTF8StringEncoding));
 
@@ -135,12 +140,12 @@ class TnrcServiceClient {
         return false;
     }
 
-    std::optional<uint32_t> CreateFunction(uint32_t device_id, const NS::String *function_name) {
+    std::optional<uint32_t> CreateFunction(uint32_t library_id, const NS::String *function_name) {
         CreateFunctionShimRequest request;
         CreateFunctionShimResponse response;
         ClientContext context;
 
-        request.set_library_id(device_id);
+        request.set_library_id(library_id);
         request.set_function_name(function_name->cString(NS::UTF8StringEncoding));
 
         // TODO: Add options and error.
@@ -178,6 +183,10 @@ class TnrcServiceClient {
         CreateComputePipelineStateShimRequest request;
         CreateComputePipelineStateShimResponse response;
         ClientContext context;
+
+        if (error != nullptr) {
+            *error = nullptr;
+        }
 
         request.set_device_id(device_id);
         request.set_function_id(func->get_function_id());
@@ -301,9 +310,14 @@ class TnrcServiceClient {
         return true;
     }
 
-    bool WaitUnitlCompleted(CommandBuffer *command_buffer) {
+    bool WaitUntilCompleted(CommandBuffer *command_buffer) {
         if (command_buffer->get_compute_encoder() == NULL) {
             std::cerr << "[SHIM] Nothing encoded in command buffer." << std::endl;
+            return true;
+        }
+
+        if (command_buffer->get_compute_encoder()->get_compute_pipeline_state() == nullptr) {
+            std::cerr << "[SHIM] No pipeline encoded in command buffer." << std::endl;
             return true;
         }
 
@@ -330,22 +344,39 @@ class TnrcServiceClient {
              compute_command_encoder->get_all_encoder_buffer_structs()) {
             Buffer *buffer = binding.buf;
 
+            if (offset > response.all_buffer_data().size() ||
+                buffer->length() > response.all_buffer_data().size() - offset) {
+                std::cerr << "[SHIM] ERROR: Server returned fewer buffer bytes than expected."
+                          << std::endl;
+                return false;
+            }
+
             memcpy(buffer->contents(), response.all_buffer_data().data() + offset, buffer->length());
             offset += buffer->length();
+        }
+
+        if (offset != response.all_buffer_data().size()) {
+            std::cerr << "[SHIM] ERROR: Server returned extra buffer bytes." << std::endl;
+            return false;
         }
 
         return true;
     }
 
   private:
-    std::unique_ptr<TnrcService::Stub> stub_;
+    std::unique_ptr<MetalRemoteService::Stub> stub_;
 };
 
 // Constructed exactly once per process when its called for the first time.
 // Subsequence calls returns the same client.
-TnrcServiceClient &Client() {
-    static TnrcServiceClient client(grpc::CreateChannel(
-        "0.0.0.0:50051", grpc::InsecureChannelCredentials()));
+MetalRemoteClient &Client() {
+    const char *configured_address = std::getenv("METAL_API_REMOTER_SERVER");
+    std::string server_address =
+        configured_address != nullptr && configured_address[0] != '\0'
+            ? configured_address
+            : "localhost:50051";
+    static MetalRemoteClient client(grpc::CreateChannel(
+        server_address, grpc::InsecureChannelCredentials()));
     return client;
 }
 } // namespace
@@ -394,16 +425,17 @@ ComputeCommandEncoder *CommandBuffer::computeCommandEncoder() {
 }
 
 void CommandBuffer::commit() {
-    bool b = Client().CommitCommandBuffer(this);
-    assert(b);
+    if (!Client().CommitCommandBuffer(this)) {
+        std::cerr << "[SHIM] ERROR: Failed to commit command buffer." << std::endl;
+    }
 }
 
 void CommandBuffer::waitUntilCompleted() {
-    bool b = Client().WaitUnitlCompleted(this);
+    bool b = Client().WaitUntilCompleted(this);
 
-    // ideally this function should not destroy anything.
-    // we should be autorelease the compute encoder and command buffer but I cant be bothered with that as of now.
-    // Since im enforcing 1 commit and 1 waitUntilCompleted this will work fine.
+    // These are plain C++ proxy objects, so Foundation's autorelease pool
+    // cannot manage them. Under the current one-commit/one-wait contract,
+    // waitUntilCompleted() is their terminal operation.
     if (b) {
         delete this->compute_command_encoder_;
         delete this;
@@ -477,8 +509,11 @@ void Buffer::release() {
 }
 
 Buffer *Device::newBuffer(NS::UInteger length, MTL::ResourceOptions options) {
-    // TODO: Explore if other options are possible.
-    assert(options == 0);
+    if (options != 0) {
+        std::cerr << "[SHIM] ERROR: Shim currently supports only shared buffers with options=0."
+                  << std::endl;
+        return nullptr;
+    }
     Buffer *buffer = Client().CreateBuffer(device_id_, length, options);
 
     if (buffer != NULL) {

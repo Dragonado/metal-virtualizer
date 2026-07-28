@@ -1,7 +1,7 @@
 syntax = "proto3";
-package tnrc;
+package metal_remote;
 
-service TnrcService {
+service MetalRemoteService {
   rpc CreateSystemDefaultDeviceShim(CreateSystemDefaultDeviceShimRequest) returns (CreateSystemDefaultDeviceShimResponse);
   rpc ReleaseDeviceShim(ReleaseDeviceShimRequest) returns (ReleaseDeviceShimResponse);
   rpc CreateCommandQueueShim(CreateCommandQueueShimRequest) returns (CreateCommandQueueShimResponse);
@@ -93,10 +93,6 @@ message ReleaseComputePipelineStateShimRequest {
 }
 
 message ReleaseComputePipelineStateShimResponse {}
-
-message MaxTotalThreadsPerThreadgroupShimRequest {
-  uint32 compute_pipeline_state_id = 1;
-}
 
 message CreateBufferShimRequest {
   uint32 device_id = 1;
