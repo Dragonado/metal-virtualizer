@@ -206,7 +206,13 @@ class CommandQueue {
 class Device {
 
   public:
-    Device(uint32_t device_id, NS::String *device_name) : device_id_(device_id), device_name_(device_name) {}
+    Device(uint32_t device_id, NS::String *device_name) : device_id_(device_id), device_name_(device_name) {
+        device_name_->retain();
+    }
+
+    ~Device() {
+        device_name_->release();
+    }
 
     NS::String *name();
 
@@ -217,6 +223,7 @@ class Device {
     ComputePipelineState *newComputePipelineState(const Function *func, NS::Error **error);
 
     Buffer *newBuffer(NS::UInteger length, MTL::ResourceOptions options);
+    void release();
     uint32_t device_id() {
         return device_id_;
     }

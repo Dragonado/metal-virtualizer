@@ -161,6 +161,7 @@ class Adder {
 };
 
 int main() {
+    NS::AutoreleasePool *autorelease_pool = NS::AutoreleasePool::alloc()->init();
 
     MTL::Device *device = MTL::CreateSystemDefaultDevice();
     std::cout << "Name = " << device->name()->cString(NS::UTF8StringEncoding) << std::endl;
@@ -174,5 +175,7 @@ int main() {
     adder->verify();
 
     delete adder;
+    device->release();
+    autorelease_pool->release();
     return 0;
 }

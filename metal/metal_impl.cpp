@@ -42,6 +42,24 @@ class TnrcServiceClient {
         }
     }
 
+    bool ReleaseDevice(uint32_t device_id) {
+        ReleaseDeviceShimRequest request;
+        ReleaseDeviceShimResponse response;
+        ClientContext context;
+
+        request.set_device_id(device_id);
+
+        Status status = stub_->ReleaseDeviceShim(&context, request, &response);
+
+        if (status.ok()) {
+            return true;
+        }
+
+        std::cerr << "[SHIM] ERROR: " << status.error_code() << ": " << status.error_message()
+                  << std::endl;
+        return false;
+    }
+
     std::optional<uint32_t> CreateCommandQueue(uint32_t device_id) {
         CreateCommandQueueShimRequest request;
         CreateCommandQueueShimResponse response;
@@ -334,6 +352,12 @@ TnrcServiceClient &Client() {
 
 NS::String *Device::name() {
     return this->device_name_;
+}
+
+void Device::release() {
+    if (Client().ReleaseDevice(device_id_)) {
+        delete this;
+    }
 }
 
 Device *CreateSystemDefaultDevice() {
