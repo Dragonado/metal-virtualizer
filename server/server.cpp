@@ -534,10 +534,9 @@ class ShimmerImpl final : public MetalRemoteService::Service {
     }
 
     ~ShimmerImpl() {
-        {
-            std::lock_guard<std::mutex> lock(mtx_);
-            is_server_shutdown = true;
-        }
+        mtx_.lock();
+        is_server_shutdown = true;
+        mtx_.unlock();
 
         scheduler_cv_.notify_one();
         scheduler_thread_.join();
