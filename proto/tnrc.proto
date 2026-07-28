@@ -94,10 +94,6 @@ message ReleaseComputePipelineStateShimRequest {
 
 message ReleaseComputePipelineStateShimResponse {}
 
-message MaxTotalThreadsPerThreadgroupShimRequest {
-  uint32 compute_pipeline_state_id = 1;
-}
-
 message CreateBufferShimRequest {
   uint32 device_id = 1;
   uint64 length = 2;

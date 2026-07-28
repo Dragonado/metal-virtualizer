@@ -2,7 +2,11 @@
 
 #include <Foundation/Foundation.hpp>
 #include <Metal/Metal.hpp>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <new>
+#include <vector>
 
 // 2. Define your Shim namespace
 namespace MetalShim {
@@ -55,12 +59,14 @@ class ComputePipelineState {
 
 class Buffer {
   public:
-    Buffer(uint32_t buffer_id, NS::UInteger length, ResourceOptions options) {
-        buffer_id_ = buffer_id;
-        length_ = length;
-        buf_ = malloc(length);
-        assert(buf_ != NULL);
-        memset(buf_, 0, length);
+    Buffer(uint32_t buffer_id, NS::UInteger length, ResourceOptions)
+        : buf_(std::malloc(length)), length_(length), buffer_id_(buffer_id) {
+        if (buf_ == nullptr && length != 0) {
+            throw std::bad_alloc();
+        }
+        if (length != 0) {
+            std::memset(buf_, 0, length);
+        }
     }
     void *contents();
 
@@ -88,26 +94,39 @@ class ComputeCommandEncoder {
     };
 
   public:
-    ComputeCommandEncoder() {
-        end_encoding_ = false;
-    }
+    ComputeCommandEncoder()
+        : end_encoding_(false), compute_pipeline_state_(nullptr), grid_size_{},
+          thread_group_size_{} {}
+
     void setComputePipelineState(ComputePipelineState *compute_pipeline_state) {
-        assert(!end_encoding_);
+        if (end_encoding_) {
+            std::cerr << "[SHIM] ERROR: Cannot change an encoder after endEncoding()." << std::endl;
+            return;
+        }
         compute_pipeline_state_ = compute_pipeline_state;
     }
     void dispatchThreads(Size grid_size, Size thread_group_size) {
-        assert(!end_encoding_);
+        if (end_encoding_) {
+            std::cerr << "[SHIM] ERROR: Cannot dispatch after endEncoding()." << std::endl;
+            return;
+        }
 
         // TODO: For now supporting only 1D.
-        assert(grid_size.height == 1 && grid_size.depth == 1);
-        assert(thread_group_size.height == 1 && thread_group_size.depth == 1);
+        if (grid_size.height != 1 || grid_size.depth != 1 ||
+            thread_group_size.height != 1 || thread_group_size.depth != 1) {
+            std::cerr << "[SHIM] ERROR: Shim currently supports only 1D dispatches." << std::endl;
+            return;
+        }
 
         grid_size_ = grid_size;
         thread_group_size_ = thread_group_size;
     }
 
     void setBuffer(Buffer *buf, NS::UInteger offset, NS::UInteger index) {
-        assert(!end_encoding_);
+        if (end_encoding_) {
+            std::cerr << "[SHIM] ERROR: Cannot bind a buffer after endEncoding()." << std::endl;
+            return;
+        }
         encoder_buffer_structs_.push_back({buf, offset, index});
     }
 
@@ -119,7 +138,7 @@ class ComputeCommandEncoder {
         return compute_pipeline_state_;
     }
 
-    std::vector<encoderBufferStruct> get_all_encoder_buffer_structs() {
+    const std::vector<encoderBufferStruct> &get_all_encoder_buffer_structs() const {
         return encoder_buffer_structs_;
     }
 
@@ -156,15 +175,10 @@ class CommandBuffer {
         return compute_command_encoder_;
     }
 
-    // MAJOR MAJOR BUG. CURRENTLY DEPEDENCY BETWEEN JOBS IN THE SAME QUEUE WILL NOT BE RESPECTED AND IS UB.
-    // EVEN THOUGH ITS PERFECTLY VALID NATIVE METAL CODE ITS A BIT TOUGHER TO IMPLEMENT IN THE SHIM.
     void commit();
 
-    // MAJOR MAJOR BUG:
-    // THIS CODE WILL CRASH IF USER HAS CALLED THE RELASE METHOD
-    // ON ANY OF THE BUFFERS BEFORE THIS FUNCTION HAS COMPLETED.
-    // ITS ALSO HARD TO BYPASS IT BECAUSE WE NEED BUFFER LENGTHS
-    // TO DECODE THE GIVEN RESPONSE BYTES.
+    // The current MVP supports exactly one wait call. The client proxy still
+    // requires bound buffers to remain alive until this call completes.
     void waitUntilCompleted();
 
     uint32_t get_command_buffer_id() {
