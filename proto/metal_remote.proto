@@ -1,7 +1,7 @@
 syntax = "proto3";
-package tnrc;
+package metal_remote;
 
-service TnrcService {
+service MetalRemoteService {
   rpc CreateSystemDefaultDeviceShim(CreateSystemDefaultDeviceShimRequest) returns (CreateSystemDefaultDeviceShimResponse);
   rpc ReleaseDeviceShim(ReleaseDeviceShimRequest) returns (ReleaseDeviceShimResponse);
   rpc CreateCommandQueueShim(CreateCommandQueueShimRequest) returns (CreateCommandQueueShimResponse);

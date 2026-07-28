@@ -10,7 +10,7 @@ cc_library(
         "metal_shim.h",
     ],
     deps = [
-        "//proto:tnrc_cc_grpc",
+        "//proto:metal_remote_cc_grpc",
         "//third_party/metal-cpp",
         "//third_party/metal-cpp:foundation-impl",
         "@grpc//:grpc++",

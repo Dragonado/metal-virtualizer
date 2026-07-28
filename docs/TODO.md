@@ -1,4 +1,4 @@
-# tnrc build plan
+# Metal API Remoter build plan
 
 Ordered by build sequence, not by importance. Each milestone is a provable
 checkpoint. The seams from the design discussion are grouped into the milestone
@@ -9,21 +9,21 @@ Legend: (create) object seam, (cmd) command seam, (coh) coherence seam,
 
 ## M0 — Transport and build scaffolding
 
-The current `build.sh` is one `clang++` call. It will not survive gRPC and
-protobuf codegen. Stand up the plumbing before any Metal crosses the wire.
+The original `build.sh` was one `clang++` call, which could not support gRPC
+and protobuf code generation. Bazel now owns that plumbing.
 
 - [x] Move to a real build system (went with Bazel, not CMake) that runs protobuf/gRPC codegen; everything including the metal sample builds via `bazel build //...`
-- [ ] Define the `.proto` service skeleton with one hello RPC
-- [ ] Trivial client <-> server RPC round-trips, no Metal involved
-- [ ] Decide the process model (client process <-> local daemon over gRPC loopback for MVP)
+- [x] Define the protobuf/gRPC service contract
+- [x] Trivial client <-> server RPC round-trips
+- [x] Decide the MVP process model: client process to standalone gRPC server
 
 ## M1 — Root interposition + handle plumbing (riskiest proof)
 
 - [ ] Interpose `MTLCreateSystemDefaultDevice()` and return a proxy device
 - [x] DECIDE the proxy strategy: header shim (DECIDED). ObjC-runtime interposition is a stretch goal only.
-- [ ] Handle table on both sides: proxy handle <-> server object
+- [x] Handle table on both sides: proxy handle <-> server object
 - [ ] Server creates the ONE real device once, shared across all sessions
-- [ ] Reject unknown or released remote handles with `NOT_FOUND`; never use
+- [x] Reject unknown or released remote handles with `NOT_FOUND`; never use
       `map[id]` for an untrusted RPC ID because it inserts a null entry.
 - [ ] Prove it end to end: (query) `device->name()`, `device->supportsFamily()` forward over the wire and print correctly
 
@@ -32,11 +32,11 @@ protobuf codegen. Stand up the plumbing before any Metal crosses the wire.
 Each returns a proxy carrying a server-side handle. Failable ones must
 round-trip the `NS::Error`.
 
-- [ ] (create) `newCommandQueue`
-- [ ] (create) `newLibrary(source, ...)` — ships the source string, compiles server-side
-- [ ] (create) `newFunction(name)`
-- [ ] (create) `newComputePipelineState(func, &err)` — piggyback `maxTotalThreadsPerThreadgroup` on the response so it never needs its own round-trip
-- [ ] (create) `newBuffer(length, options)` — allocate server buffer AND client shadow; ship length+options only, not contents
+- [x] (create) `newCommandQueue`
+- [x] (create) `newLibrary(source, ...)` — ships the source string, compiles server-side
+- [x] (create) `newFunction(name)`
+- [x] (create) `newComputePipelineState(func, &err)` — piggyback `maxTotalThreadsPerThreadgroup` on the response so it never needs its own round-trip
+- [x] (create) `newBuffer(length, options)` — allocate server buffer AND client shadow; ship length+options only, not contents
 - [ ] Convert server-side creation failures into a local `NS::Error` when the
       caller supplies `NS::Error**`; never leave the caller's error pointer
       uninitialized.
@@ -46,24 +46,24 @@ round-trip the `NS::Error`.
 Command seams do NOT each cross the wire. They append to a local command list
 that flushes at commit. This batching is the latency hider.
 
-- [ ] (create) `queue->commandBuffer()` opens a local recording
-- [ ] (create) `commandBuffer->computeCommandEncoder()` opens an encoding scope
-- [ ] (cmd) `setComputePipelineState`
-- [ ] (cmd) `setBuffer` — record which buffers are bound; this feeds commit's snapshot
-- [ ] (cmd) `dispatchThreads`
-- [ ] (cmd) `endEncoding`
-- [ ] (coh) `commit()` — flush command list + snapshot bound input buffers, ship both
-- [ ] (data) `buffer->contents()` — return the client shadow pointer (allocated at newBuffer)
-- [ ] (coh) completion / `waitUntilCompleted()` — deliver output bytes back into shadows
-- [ ] MILESTONE: the vector-add from `main.cpp` runs correctly over the wire and `verify()` passes
+- [x] (create) `queue->commandBuffer()` opens a local recording
+- [x] (create) `commandBuffer->computeCommandEncoder()` opens an encoding scope
+- [x] (cmd) `setComputePipelineState`
+- [x] (cmd) `setBuffer` — record which buffers are bound; this feeds commit's snapshot
+- [x] (cmd) `dispatchThreads`
+- [x] (cmd) `endEncoding`
+- [x] (coh) `commit()` — flush command list + snapshot bound input buffers, ship both
+- [x] (data) `buffer->contents()` — return the client shadow pointer (allocated at newBuffer)
+- [x] (coh) completion / `waitUntilCompleted()` — deliver output bytes back into shadows
+- [x] MILESTONE: the vector-add from `main.cpp` runs correctly over the wire and `verify()` passes
 
 ## M4 — Copy-at-commit shim correctness
 
-- [ ] Snapshot-both-ways per bound buffer (correct-but-wasteful baseline)
-- [ ] Confirm coherence contract: inputs at commit, outputs at completion, stale-before-completion matches local semantics
+- [x] Snapshot-both-ways per bound buffer (correct-but-wasteful baseline)
+- [x] Confirm coherence contract: inputs at commit, outputs at completion, stale-before-completion matches local semantics
 - [ ] Storage-mode routing: Shared (shadow + copy), Private (server-only + blit), Managed (explicit sync hooks)
 - [ ] Document the unsupported pattern (concurrent mid-flight CPU/GPU access), do not police it
-- [ ] (life) `retain` / `release` -> server-side GC: free buffers and PSOs when the client is done (mandatory with multiple tenants)
+- [x] (life) release RPCs -> server-side GC for public handles
 
 ## M5 — Multi-tenant + scheduler
 
@@ -73,26 +73,25 @@ Two independent decisions live here. Do not conflate them.
 - Policy (how committed work is ordered once several tenants have some): trivial
   FIFO vs fair-share / priority / preemption.
 
-DECISION: concurrent admission + trivial FIFO policy. Only concurrent admission
-produces an instantaneous utilization uplift; serial admission just packs
-tenants over wall-clock time and cannot move the 50%->95% number. The
-interleaving mechanism is nearly free once session isolation exists: everything
-funnels through one server and one real queue, so gap-fill falls out of "one
-submission point, multiple producers." FIFO is enough for the proof. Fancy
-policy is deferred.
+DECISION: start with concurrent admission + trivial FIFO policy. The current
+FIFO scheduler establishes one submission point for multiple producers, but it
+does not by itself prove a utilization improvement. The proof still needs
+bursty workloads, admission/in-flight control that can fill observable GPU
+gaps, and measurements against the native-local baseline. Fair-share and
+priority policy remain deferred.
 
-- [ ] Two independent client sessions against one server/GPU, admitted CONCURRENTLY
+- [x] Multiple independent client processes against one server/GPU, admitted concurrently
 - [ ] Session isolation: separate handle tables, separate command streams, per-session copy-at-commit
-- [ ] Do NOT hold a global lock that serializes tenants across GPU submit (that would silently make it serial)
-- [ ] FIFO submission of committed command buffers across tenants (this IS the gap-fill mechanism, not a separate component)
+- [x] Do not hold the global lock while waiting for GPU completion or copying output payloads
+- [x] FIFO submission of committed command buffers across clients
 - [ ] Preserve commit order within each client's command stream. The scheduler
       may interleave independent work from different clients, but it must never
       submit one client's `A2` before that client's earlier `A1`; same-queue
       Metal ordering is how valid GPU-to-GPU dependencies work without a CPU
       `waitUntilCompleted()` between them.
-- [ ] Synchronize shared server handle tables and ID allocation before allowing
+- [x] Synchronize shared server handle tables and ID allocation before allowing
       concurrent RPC handlers to mutate them.
-- [ ] Start with one mutex for `counter_` and all handle maps. Keep its critical
+- [x] Start with one mutex for `counter_` and all handle maps. Keep its critical
       sections to ID/map bookkeeping only; do not hold it while waiting for the
       GPU. Consider per-map locks only after measuring contention, with a fixed
       lock order and safe object lifetimes after lookup.
@@ -135,10 +134,10 @@ which is not the claim being made.)
 
 ## Post-MVP hardening
 
-- [ ] Handle failed gRPC statuses before using response data.
-- [ ] Validate malformed RPC data server-side, including parallel repeated-field
+- [x] Handle failed gRPC statuses before using response data.
+- [x] Validate malformed RPC data server-side, including parallel repeated-field
       lengths and packed buffer-data sizes.
-- [ ] Clean up completed server command buffers.
+- [x] Clean up completed server command buffers.
 
 ## Optimizations (after the skeleton works)
 
