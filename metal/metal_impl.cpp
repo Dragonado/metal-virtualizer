@@ -10,22 +10,22 @@
 
 #include "metal_shim.h"
 
-#include "proto/tnrc.grpc.pb.h"
-#include "proto/tnrc.pb.h"
+#include "proto/metal_remote.grpc.pb.h"
+#include "proto/metal_remote.pb.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 
-using namespace tnrc;
+using namespace metal_remote;
 
 namespace MetalShim {
 
 namespace {
-class TnrcServiceClient {
+class MetalRemoteClient {
   public:
-    TnrcServiceClient(std::shared_ptr<Channel> channel)
-        : stub_(TnrcService::NewStub(channel)) {}
+    MetalRemoteClient(std::shared_ptr<Channel> channel)
+        : stub_(MetalRemoteService::NewStub(channel)) {}
 
     Device *CreateDevice() {
         CreateSystemDefaultDeviceShimRequest request;
@@ -364,18 +364,18 @@ class TnrcServiceClient {
     }
 
   private:
-    std::unique_ptr<TnrcService::Stub> stub_;
+    std::unique_ptr<MetalRemoteService::Stub> stub_;
 };
 
 // Constructed exactly once per process when its called for the first time.
 // Subsequence calls returns the same client.
-TnrcServiceClient &Client() {
+MetalRemoteClient &Client() {
     const char *configured_address = std::getenv("METAL_API_REMOTER_SERVER");
     std::string server_address =
         configured_address != nullptr && configured_address[0] != '\0'
             ? configured_address
             : "localhost:50051";
-    static TnrcServiceClient client(grpc::CreateChannel(
+    static MetalRemoteClient client(grpc::CreateChannel(
         server_address, grpc::InsecureChannelCredentials()));
     return client;
 }

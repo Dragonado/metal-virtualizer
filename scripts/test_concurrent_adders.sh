@@ -32,7 +32,7 @@ fi
 bazel build "${bazel_args[@]}" //src:adder
 adder_binary="$(bazel cquery "${bazel_args[@]}" --output=files //src:adder)"
 
-log_dir="$(mktemp -d "${TMPDIR:-/tmp}/metal-virtualizer-concurrency.XXXXXX")"
+log_dir="$(mktemp -d "${TMPDIR:-/tmp}/metal-api-remoter-concurrency.XXXXXX")"
 test_passed=false
 
 cleanup() {

@@ -18,8 +18,8 @@
 #include "absl/flags/parse.h"
 #include "absl/log/initialize.h"
 #include "absl/strings/str_format.h"
-#include "proto/tnrc.grpc.pb.h"
-#include "proto/tnrc.pb.h"
+#include "proto/metal_remote.grpc.pb.h"
+#include "proto/metal_remote.pb.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -27,7 +27,7 @@ using grpc::ServerContext;
 using grpc::Status;
 using grpc::StatusCode;
 
-using namespace tnrc;
+using namespace metal_remote;
 
 ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
@@ -62,7 +62,7 @@ struct Job {
 };
 
 // Logic and data behind the server's behavior.
-class ShimmerImpl final : public TnrcService::Service {
+class ShimmerImpl final : public MetalRemoteService::Service {
   public:
     void fail_job_locked(const std::shared_ptr<Job> &job, StatusCode code,
                          const std::string &message) {

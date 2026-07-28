@@ -9,7 +9,7 @@ cc_binary(
     name = "server",
     srcs = ["server.cpp"],
     deps = [
-        "//proto:tnrc_cc_grpc",
+        "//proto:metal_remote_cc_grpc",
         "//third_party/metal-cpp",
         "@abseil-cpp//absl/flags:flag",
         "@abseil-cpp//absl/flags:parse",

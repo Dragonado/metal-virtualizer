@@ -17,7 +17,6 @@
   "files.readonlyInclude": {
     "third_party/metal-cpp/**": true
   },
-  "bazel.buildifierExecutable": "/opt/homebrew/bin/buildifier",
   "bazel.buildifierFixOnFormat": true,
   "[starlark]": {
     "editor.formatOnSave": true,

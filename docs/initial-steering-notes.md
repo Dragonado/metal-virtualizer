@@ -1,4 +1,8 @@
-# Steering Doc: Metal GPU Remoting & Oversubscription on Apple Silicon
+# Initial steering notes: Metal GPU remoting on Apple Silicon
+
+> Process archive: this document captured the initial mentoring instructions
+> and research direction. It is not the project design specification. Start
+> with [DESIGN.md](DESIGN.md) for the current human-facing architecture.
 
 **Project codename suggestion:** `metalstorm` (placeholder, rename freely)
 **Audience of this doc:** an expert Claude agent who will mentor the builder.
