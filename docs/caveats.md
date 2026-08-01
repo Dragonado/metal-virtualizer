@@ -1,5 +1,9 @@
 # Caveats
 
+These are known boundaries of the current implementation, not failures of the
+controlled demo. The demo uses supported calls, keeps its proxy resources alive
+through completion, waits exactly once, and trusts every client.
+
 ## Cached Foundation strings
 
 `NS::String::string(...)` returns an autoreleased object. If `Device` stores
@@ -20,12 +24,26 @@ client-local error object when that output pointer is supplied. Returning
 `nullptr` while leaving the caller's `NS::Error*` uninitialized makes normal
 error handling unsafe.
 
-## One physical device should have one server owner
+## Multiple device objects still target one physical GPU
 
 Calling `MTL::CreateSystemDefaultDevice()` repeatedly still reaches the same
-physical GPU, but the server should create and retain one real device for its
-lifetime. Client-facing device IDs can all refer to that shared server object.
-This makes the single scheduling point explicit.
+physical GPU. The current server gives each client-facing device ID its own
+real `MTL::Device` object. That is sufficient for the demo: the FIFO scheduler,
+not object identity, is the central submission point.
+
+The server could cache one real device object later, but then a client device
+release must remove only that client's handle and must not destroy an object
+still used by another client. The cache is an ownership optimization, not a
+requirement for sharing the GPU.
+
+## Concurrent mid-flight CPU and GPU access is outside the contract
+
+The client sees a shadow allocation while the server GPU uses a different real
+buffer. CPU writes made after `commit()` are not sent to that already-submitted
+job, and GPU writes are not visible in the shadow until
+`waitUntilCompleted()` returns. Programs that concurrently mutate or inspect a
+buffer while GPU work is in flight can therefore differ from native unified
+memory behavior. The controlled demo writes before commit and reads after wait.
 
 ## gRPC handlers may run concurrently
 

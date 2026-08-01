@@ -16,6 +16,25 @@ This is an active research prototype. The current scheduler performs
 thread-safe FIFO submission. Metadata-aware gap filling and a measured
 utilization improvement are goals, not completed benchmark claims.
 
+## Demo status
+
+The working demo is complete for the project's current API boundary. It shows
+that the same vector-add source can run either through native Metal or through
+the remoter, without changing its Metal calls. In remote mode it demonstrates:
+
+- compile-time substitution of the supported `metal-cpp` surface;
+- server-side creation of real Metal objects represented by client handles;
+- local command encoding followed by one batched RPC at `commit()`;
+- copy-at-commit input snapshots and copyback at completion;
+- explicit remote object release; and
+- 100 concurrent client processes sharing one server and physical GPU through
+  a thread-safe FIFO submission path.
+
+This demo establishes functional remoting and concurrent admission. It does
+not claim that remote execution is faster than native Metal, that FIFO is an
+advanced scheduling policy, or that hostile clients are isolated. Those are
+separate extensions rather than blockers for demonstrating the architecture.
+
 ## Architecture
 
 ```text
@@ -161,6 +180,10 @@ bazel run //:refresh_compile_commands
   synchronization are outside the MVP.
 - Buffer payloads use protobuf `bytes`; large workloads will need message-limit
   changes or chunked streaming.
+
+The authoritative list of optional follow-up work is in
+[TODO.md](docs/TODO.md). None of those unchecked items is required for the
+current controlled vector-add demo.
 
 ## Repository layout
 

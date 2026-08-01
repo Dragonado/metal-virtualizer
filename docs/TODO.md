@@ -4,6 +4,28 @@ Ordered by build sequence, not by importance. Each milestone is a provable
 checkpoint. The seams from the design discussion are grouped into the milestone
 where they first have to work.
 
+## Current status
+
+The controlled demo is complete. A supported `metal-cpp` vector-add program can
+run through the remote server, copy its inputs and outputs across the network,
+verify the result, release its remote objects, and run concurrently with 99
+other client processes through the FIFO submission thread.
+
+Unchecked items below are follow-up work. They improve API coverage, native
+Metal compatibility, isolation, performance, or the strength of a future
+scheduler experiment; they do not block the present TNR demo.
+
+### Demonstrated end to end
+
+- [x] Run identical client source against native Metal or the compile-time shim.
+- [x] Execute vector addition remotely and verify every output element.
+- [x] Batch recorded encoder state and buffer snapshots into the commit RPC.
+- [x] Return completed GPU buffer contents to the client shadows.
+- [x] Run 100 remote clients concurrently without corrupting shared server state.
+- [x] Admit committed jobs through one asynchronous FIFO scheduler thread.
+- [x] Fail malformed requests, missing handles, and unavailable-server RPCs
+      cleanly instead of dereferencing invalid state.
+
 Legend: (create) object seam, (cmd) command seam, (coh) coherence seam,
 (life) lifecycle seam, (query) query seam.
 
@@ -19,13 +41,17 @@ and protobuf code generation. Bazel now owns that plumbing.
 
 ## M1 — Root interposition + handle plumbing (riskiest proof)
 
-- [ ] Interpose `MTLCreateSystemDefaultDevice()` and return a proxy device
+- [x] Substitute `MTLCreateSystemDefaultDevice()` at compile time and return a
+      proxy device.
 - [x] DECIDE the proxy strategy: header shim (DECIDED). ObjC-runtime interposition is a stretch goal only.
 - [x] Handle table on both sides: proxy handle <-> server object
-- [ ] Server creates the ONE real device once, shared across all sessions
+- [x] Server creates real device objects that target the host's physical GPU.
+      Caching one shared `MTL::Device` wrapper is optional and needs deliberate
+      release ownership; it is not required to share the physical GPU.
 - [x] Reject unknown or released remote handles with `NOT_FOUND`; never use
       `map[id]` for an untrusted RPC ID because it inserts a null entry.
-- [ ] Prove it end to end: (query) `device->name()`, `device->supportsFamily()` forward over the wire and print correctly
+- [x] Prove `device->name()` end to end.
+- [ ] Add `device->supportsFamily()` if a future workload needs it.
 
 ## M2 — Object (create) seams
 
@@ -62,7 +88,8 @@ that flushes at commit. This batching is the latency hider.
 - [x] Snapshot-both-ways per bound buffer (correct-but-wasteful baseline)
 - [x] Confirm coherence contract: inputs at commit, outputs at completion, stale-before-completion matches local semantics
 - [ ] Storage-mode routing: Shared (shadow + copy), Private (server-only + blit), Managed (explicit sync hooks)
-- [ ] Document the unsupported pattern (concurrent mid-flight CPU/GPU access), do not police it
+- [x] Document the unsupported concurrent mid-flight CPU/GPU access pattern; do
+      not police it.
 - [x] (life) release RPCs -> server-side GC for public handles
 
 ## M5 — Multi-tenant + scheduler
@@ -81,25 +108,24 @@ gaps, and measurements against the native-local baseline. Fair-share and
 priority policy remain deferred.
 
 - [x] Multiple independent client processes against one server/GPU, admitted concurrently
-- [ ] Session isolation: separate handle tables, separate command streams, per-session copy-at-commit
+- [ ] OPTIONAL SECURITY: session isolation with per-session handle ownership.
+      The controlled demo trusts its clients and makes no malicious-client claim.
 - [x] Do not hold the global lock while waiting for GPU completion or copying output payloads
 - [x] FIFO submission of committed command buffers across clients
-- [ ] Preserve commit order within each client's command stream. The scheduler
-      may interleave independent work from different clients, but it must never
-      submit one client's `A2` before that client's earlier `A1`; same-queue
-      Metal ordering is how valid GPU-to-GPU dependencies work without a CPU
-      `waitUntilCompleted()` between them.
+- [x] Preserve enqueue order with one FIFO and one submission thread. The demo
+      performs sequential commits per client. A future API that permits
+      concurrent commits to the same logical queue must define their order.
 - [x] Synchronize shared server handle tables and ID allocation before allowing
       concurrent RPC handlers to mutate them.
 - [x] Start with one mutex for `counter_` and all handle maps. Keep its critical
       sections to ID/map bookkeeping only; do not hold it while waiting for the
       GPU. Consider per-map locks only after measuring contention, with a fixed
       lock order and safe object lifetimes after lookup.
-- [ ] Scheduler job lifetime: at enqueue, retain the real command queue,
+- [ ] NATIVE-COMPATIBILITY: at enqueue, retain the real command queue,
       pipeline state, and bound buffers in `PendingJob`. A client `release()`
       removes its public handle, but the real object stays alive until every
       queued or running job using it has completed.
-- [ ] Scheduler completion copyback: store output bytes with the completed job
+- [ ] NATIVE-COMPATIBILITY: store output bytes with the completed job
       instead of looking buffers up through global maps in
       `WaitUntilCompleted()`. Copy results only into client shadow buffers that
       are still live; a client that released its last buffer handle cannot
@@ -117,7 +143,13 @@ priority policy remain deferred.
       acquisition is forced through the shim. A VM that exposes a local virtual
       GPU/Metal path can bypass the remoting layer and invalidate the test.
 
-## M6 — The proof (measurement)
+## M6 — Optional scheduler research and measurement
+
+This milestone is not part of the functional remoting demo. The current result
+proves that the server can accept concurrent clients and centrally order their
+command buffers. It does not yet prove that this path improves utilization or
+outperforms Metal's native scheduling. Do not present the following targets as
+measured results until the experiment exists.
 
 Metric is pinned to the concurrent-admission model: INSTANTANEOUS GPU
 utilization sampled while two tenants run at the same time. (Serial admission
@@ -125,7 +157,9 @@ would force a different metric, "fraction of wall-clock time the GPU is busy,"
 which is not the claim being made.)
 
 - [ ] Instrument GPU utilization (instantaneous, sampled during the concurrent run)
-- [ ] Two GPU-less tenants driving one GPU concurrently: measure uplift, target ~50% -> ~95%
+- [ ] Two GPU-less tenants driving one GPU concurrently: measure whether there
+      is any utilization uplift; treat ~50% -> ~95% as a hypothesis, not a
+      current project result.
 - [ ] CAVEAT (Risk #5): gap-fill only helps if tenants leave gaps. Use bursty,
       sub-saturating workloads. Two tenants that each already saturate the GPU
       alone gain nothing and the number will not move. The demo workloads must
