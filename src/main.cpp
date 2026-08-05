@@ -8,7 +8,11 @@
 #include "Foundation/Foundation.hpp"
 #include "Metal/Metal.hpp"
 
-constexpr size_t MAXN = 100;
+#ifndef MAR_ARRAY_SIZE
+#define MAR_ARRAY_SIZE 100
+#endif
+
+constexpr size_t MAXN = MAR_ARRAY_SIZE;
 constexpr float EPS = 1e-5;
 
 class Adder {

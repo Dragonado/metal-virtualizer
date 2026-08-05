@@ -9,6 +9,7 @@
 
 #include <grpc/impl/channel_arg_names.h>
 #include <grpcpp/grpcpp.h>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -57,6 +58,11 @@ struct Job {
     MTL::CommandBuffer *command_buffer = nullptr;
     JobState state = JobState::NOT_STARTED;
 
+    std::chrono::steady_clock::time_point enqueued_time;
+    std::chrono::steady_clock::time_point submitted_time;
+    std::chrono::steady_clock::time_point completed_time;
+    std::chrono::steady_clock::time_point returned_time;
+
     Status failure_status;
     std::condition_variable completed_cv;
 };
@@ -73,6 +79,7 @@ class ShimmerImpl final : public MetalRemoteService::Service {
 
     void update_job_status_after_completion(const std::shared_ptr<Job> job) {
         std::lock_guard<std::mutex> lock(mtx_);
+        job->completed_time = std::chrono::steady_clock::now();
         if (job->command_buffer->status() == MTL::CommandBufferStatus::CommandBufferStatusCompleted) {
             job->state = JobState::COMPLETED;
         } else {
@@ -184,6 +191,7 @@ class ShimmerImpl final : public MetalRemoteService::Service {
                 continue;
             }
             job->state = JobState::RUNNING;
+            job->submitted_time = std::chrono::steady_clock::now();
 
             lock.unlock();
             commit_job(job);
@@ -461,6 +469,7 @@ class ShimmerImpl final : public MetalRemoteService::Service {
         job->state = JobState::QUEUED;
         job_map_[job->command_buffer_id] = job;
         ready_jobs_.push_back(job);
+        job->enqueued_time = std::chrono::steady_clock::now();
         response->set_command_buffer_id(job->command_buffer_id);
         lock.unlock();
         scheduler_cv_.notify_one();
@@ -530,6 +539,36 @@ class ShimmerImpl final : public MetalRemoteService::Service {
             buffer->release();
         }
 
+        std::chrono::steady_clock::time_point enqueued_time;
+        std::chrono::steady_clock::time_point submitted_time;
+        std::chrono::steady_clock::time_point completed_time;
+        std::chrono::steady_clock::time_point returned_time;
+        {
+            std::lock_guard<std::mutex> timeline_lock(mtx_);
+            job->returned_time = std::chrono::steady_clock::now();
+            enqueued_time = job->enqueued_time;
+            submitted_time = job->submitted_time;
+            completed_time = job->completed_time;
+            returned_time = job->returned_time;
+        }
+
+        auto to_microseconds = [](std::chrono::steady_clock::time_point time) {
+            return std::chrono::duration_cast<std::chrono::microseconds>(
+                       time.time_since_epoch())
+                .count();
+        };
+        {
+            std::lock_guard<std::mutex> timeline_log_lock(timeline_log_mtx_);
+            std::cerr << "MAR_TIMELINE"
+                      << " job=" << job->command_buffer_id
+                      << " queue=" << job->request.command_queue_id()
+                      << " enqueued_us=" << to_microseconds(enqueued_time)
+                      << " submitted_us=" << to_microseconds(submitted_time)
+                      << " completed_us=" << to_microseconds(completed_time)
+                      << " returned_us=" << to_microseconds(returned_time)
+                      << " status=completed" << std::endl;
+        }
+
         return Status::OK;
     }
 
@@ -578,6 +617,7 @@ class ShimmerImpl final : public MetalRemoteService::Service {
     std::map<uint32_t, MTL::Device *> device_map_;
 
     std::mutex mtx_;
+    std::mutex timeline_log_mtx_;
     std::condition_variable scheduler_cv_;
 
     std::deque<std::shared_ptr<Job>> ready_jobs_;
