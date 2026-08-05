@@ -58,6 +58,11 @@ struct Job {
     MTL::CommandBuffer *command_buffer = nullptr;
     JobState state = JobState::NOT_STARTED;
 
+    // Admission order, 1..N for the lifetime of the process. command_buffer_id
+    // comes from the counter shared by every resource type, so it is not a
+    // usable job number for a reader; this is.
+    uint32_t sequence = 0;
+
     std::chrono::steady_clock::time_point enqueued_time;
     std::chrono::steady_clock::time_point submitted_time;
     std::chrono::steady_clock::time_point completed_time;
@@ -466,6 +471,7 @@ class ShimmerImpl final : public MetalRemoteService::Service {
 
         lock.lock();
         job->command_buffer_id = ++counter_;
+        job->sequence = ++job_sequence_;
         job->state = JobState::QUEUED;
         job_map_[job->command_buffer_id] = job;
         ready_jobs_.push_back(job);
@@ -561,6 +567,7 @@ class ShimmerImpl final : public MetalRemoteService::Service {
             std::lock_guard<std::mutex> timeline_log_lock(timeline_log_mtx_);
             std::cerr << "MAR_TIMELINE"
                       << " job=" << job->command_buffer_id
+                      << " seq=" << job->sequence
                       << " queue=" << job->request.command_queue_id()
                       << " enqueued_us=" << to_microseconds(enqueued_time)
                       << " submitted_us=" << to_microseconds(submitted_time)
@@ -609,6 +616,7 @@ class ShimmerImpl final : public MetalRemoteService::Service {
 
   private:
     std::atomic<uint32_t> counter_;
+    std::atomic<uint32_t> job_sequence_{0};
     std::map<uint32_t, MTL::ComputePipelineState *> compute_pipeline_state_map_;
     std::map<uint32_t, MTL::Function *> function_map_;
     std::map<uint32_t, MTL::Library *> library_map_;

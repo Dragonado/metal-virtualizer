@@ -24,7 +24,9 @@ The three panels demonstrate different facts:
 - The scheduler timeline shows when MAR enqueued, submitted, completed, and returned each job.
 - Activity Monitor confirms aggregate activity on the physical Apple GPU during the experiment.
 
-The timeline must label the interval between submission and completion as **Metal in-flight**, not **GPU executing**. MAR observes when it submits a command buffer and when Metal reports completion. Metal's driver controls the actual hardware schedule inside that interval.
+The timeline labels the interval between submission and completion as **GPU computing**. This is a readability choice: "Metal in-flight" was the earlier label, but readers took "in flight" to mean the job was still in transit over the network, which is the opposite of what that segment means. The segment marks the span in which the command buffer has left MAR and is in the GPU's hands.
+
+Be aware of what the label rounds off. MAR observes only two events: the moment it called `commit()`, and the moment Metal invoked the completion handler. Metal's driver controls the hardware schedule inside that span, so the interval also contains queueing behind other command buffers, driver and residency setup, and completion-callback dispatch latency. Under 100 concurrent clients, queueing inside Metal is likely a large share of it. The label therefore means "the GPU owns this job," not "shader cores were busy for this entire bar." Keep the claim boundaries below in mind when captioning the chart.
 
 ## Minimal implementation
 
@@ -52,11 +54,23 @@ Record the timestamps at the existing state transitions:
 
 All timestamp writes must follow the same synchronization discipline as `Job::state`. Do not introduce unsynchronized reads and writes merely for instrumentation.
 
+Also record an admission sequence number. `counter_` is a single ID space shared
+by devices, queues, libraries, functions, pipeline states and buffers, so a
+client that allocates all of those burns roughly nine IDs before it reaches its
+command buffer. `command_buffer_id` therefore reads as an arbitrary number to a
+chart reader — 100 jobs produce IDs scattered up to ~1170. `Job::sequence` is a
+dedicated counter incremented in `CommitCommandBuffer()`, giving 1..N in
+admission order. Do not renumber `command_buffer_id` itself; the client protocol
+depends on it.
+
 After successful result copyback, emit one complete record for the job:
 
 ```text
-MAR_TIMELINE job=42 queue=7 enqueued_us=100 submitted_us=220 completed_us=510 returned_us=640 status=completed
+MAR_TIMELINE job=42 seq=7 queue=7 enqueued_us=100 submitted_us=220 completed_us=510 returned_us=640 status=completed
 ```
+
+`seq` is optional from the renderer's point of view: logs captured before it
+existed still render, numbered by position within the selected window.
 
 Prefer one completed record per job over four separate log lines. A single record is easier to parse and reduces interleaved output from concurrent RPC handlers. Serialize the final output using the existing server mutex or a small dedicated logging mutex. Do not hold the global mutex while performing file I/O beyond emitting the already-formatted line.
 
@@ -78,31 +92,74 @@ Implement a dependency-free Python script using only the standard library. It sh
 2. Ignore every line that does not begin with `MAR_TIMELINE`.
 3. Parse `key=value` fields.
 4. Reject or skip incomplete records with a clear warning.
-5. Sort jobs by enqueue time.
-6. Normalize all times to the earliest enqueue time.
-7. Render a standalone SVG file.
+5. Select a contiguous window of the run.
+6. Render a standalone SVG file.
 
 Suggested command:
 
 ```bash
 python3 scripts/render_scheduler_timeline.py \
   /tmp/mar-server.log \
-  /tmp/mar-scheduler-timeline.svg \
-  --limit 30
+  /tmp/mar-scheduler-timeline.svg
 ```
 
-The renderer should display a readable subset when hundreds of jobs exist. The first version can show the first 20–30 successfully returned jobs sorted by enqueue time.
+#### Two scales, two panels
 
-Suggested visual encoding:
+A job lives for tens of milliseconds inside a run that spans seconds. Those two
+scales differ by roughly three orders of magnitude, so a single absolute-time
+Gantt chart cannot carry both: every phase of every job collapses to sub-pixel
+width and the chart degenerates into a column of markers. The renderer therefore
+draws two panels.
 
-| Interval or marker | Color | Label |
+**Per-job lifecycle.** Each job is normalized to its own enqueue, so the x-axis
+reads *milliseconds since that job's own enqueue*. Phases then have comparable
+widths across jobs regardless of when a job arrived, and the panel answers the
+question the instrumentation exists to answer: where does a job's latency go?
+
+**How many jobs ran at the same time.** The same jobs in absolute time. Two jobs
+that were alive at once cannot share a row, so overlapping jobs are greedily
+packed onto separate rows; the number of rows needed is therefore the peak number
+of jobs alive simultaneously. This is where absolute position belongs. Avoid the
+word "lanes" in the rendered chart — it is implementation vocabulary and reads as
+jargon.
+
+#### Selection
+
+Taking the first N records by enqueue time is wrong when a log holds several
+client batches separated by idle seconds — the selection straddles the gaps and
+stretches the absolute axis across dead air. The renderer instead clusters
+records on enqueue gaps (`--gap-ms`, default 400) and uses the densest burst.
+`--all`, `--start-ms` and `--window-ms` override this.
+
+`--limit` defaults to 10. The workload still runs 100 clients for the Activity
+Monitor capture; only the chart samples a readable subset.
+
+Job lifetimes are heavy-tailed, so `--rows` defaults to `spread`: an evenly
+sampled set of ranks across the lifetime distribution, rather than only the
+slowest N. The lifecycle axis covers the window's p95 and marks longer bars with
+a chevron, keeping one outlier from flattening every other row. `--rows slowest`
+and `--rows first` are available.
+
+#### Encoding
+
+| Interval | Color | Label |
 | --- | --- | --- |
-| Enqueued → submitted | Gray | Waiting in MAR |
-| Submitted → completed | Blue | Metal in-flight |
+| Enqueued → submitted | Neutral gray | Waiting in MAR |
+| Submitted → completed | Blue | GPU computing |
 | Completed → returned | Orange | Result copyback |
-| Returned | Green marker | Client result ready |
 
-Each row should be labeled with at least the job ID and command-queue ID. Add a horizontal millisecond axis and a legend. Include a subtitle that states that the chart shows MAR/Metal lifecycle timestamps rather than exact GPU hardware occupancy.
+There is no separate "returned" marker: the end of the copyback segment *is* the
+return, so a marker there would restate the bar's right edge while occluding the
+segments underneath it.
+
+The two categorical hues are chosen per theme (`--theme light|dark`) and pass
+lightness-band, chroma, colorblind-separation and contrast checks against their
+own surface. Gray is a deliberate de-emphasis neutral for idle time.
+
+Each row is labeled with the job ID and command-queue ID, and carries its total
+lifetime at the bar end — a standalone SVG has no dependable tooltip layer, so
+no value is gated behind hover. Segments also carry `<title>` elements for
+viewers that do show tooltips.
 
 SVG is preferred because it requires no plotting dependency, stays sharp in the blog, and can be opened directly in a browser or Preview.
 
@@ -180,11 +237,17 @@ After the run, generate the timeline:
 ```bash
 python3 scripts/render_scheduler_timeline.py \
   /tmp/mar-server.log \
-  /tmp/mar-scheduler-timeline.svg \
-  --limit 30
+  /tmp/mar-scheduler-timeline.svg
 ```
 
 Arrange the successful-client terminal, timeline SVG, and Activity Monitor GPU History in one screenshot.
+
+Activity Monitor's History windows carry no time axis and no timestamps, and GPU
+History is device-wide with no per-process breakdown, so it cannot attribute
+usage to MAR on its own. Enable View → Columns → GPU Time and read the server
+process before and after the run for an attributable number, or use
+`powermetrics --samplers gpu_power` for timestamped samples. Instruments' Metal
+System Trace is the only per-process GPU timeline, and it needs full Xcode.
 
 ## Interpretation and claim boundaries
 
@@ -229,5 +292,7 @@ The final blog asset should be copied separately into the website repository onl
 - Timeline instrumentation does not change scheduler ordering.
 - Timeline output remains parseable under concurrent completion.
 - SVG opens in a browser and labels intervals accurately.
+- The selected window is contiguous — no idle gap inside the wall-clock axis.
+- No bar or label overflows the SVG canvas, in both `--theme light` and `--theme dark`.
 - Activity Monitor capture lasts long enough to be legible.
 - No screenshot exposes credentials, tokens, private keys, instance addresses, or unrelated personal information.
